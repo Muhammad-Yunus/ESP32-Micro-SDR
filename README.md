@@ -50,7 +50,7 @@
 
 ---
 
-## Harware WIring & Schematics
+## Harware Wiring & Schematics
 
 ![Wiring diagram and schematics](docs/hardware/wiring_diagram_and_schematics.jpg)
 ![Tayloe Detector PCD Matrix](docs/hardware/Tayloe_Detector_PCB_Matrix.jpg)
