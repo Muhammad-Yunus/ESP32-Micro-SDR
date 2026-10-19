@@ -1,0 +1,70 @@
+menu "SDR Configuration"
+
+config SDR_ADC_FS_HZ
+    int "ADC sample rate per channel (Hz)"
+    default 48000
+    help
+        Target sampling rate for each I/Q channel. Actual rate is measured
+        at runtime and used for NCO/FFT calculations.
+
+config SDR_FFT_N
+    int "FFT size (points)"
+    default 1024
+    help
+        Spectrum FFT length at the decimated 12 kHz IQ stream.
+
+config SDR_DISPLAY_SPAN_HZ
+    int "Display span (+/- Hz)"
+    default 3000
+    help
+        Half-width of the spectrum/waterfall display around the tuned
+        frequency.
+
+config SDR_BFO_HZ
+    int "BFO frequency (Hz)"
+    default 1500
+    help
+        Second mixer of the Weaver demodulator (passband center).
+
+config SDR_WATERFALL_ROWS
+    int "Waterfall rows"
+    default 64
+    help
+        Number of waterfall lines (each line = one spectrum snapshot).
+        Reduce to 48 if internal RAM is tight.
+
+config SDR_ADC_ATTEN_DB
+    int "ADC attenuation (dB)"
+    default 11
+    help
+        ADC input attenuation. 11 dB matches the front-end output scaled
+        to <= +/-1 V around a 1.65 V bias.
+
+config SDR_DEFAULT_LO_HZ
+    int "Default LO label (Hz)"
+    default 7030000
+    help
+        Visual-only LO frequency label shown in the top bar (the real LO
+        is driven by an external Si5351 controller).
+
+config SDR_LO_MAX_HZ
+    int "Maximum LO label (Hz)"
+    default 30000000
+    help
+        Upper bound for the visual-only LO frequency label (7-segment bar)
+        and for the keypad "LO label" entry.
+
+config SDR_NCO_LIMIT_HZ
+    int "NCO offset limit (+/- Hz)"
+    default 6000
+    help
+        Maximum software offset tuning range.
+
+config SDR_DEFAULT_VOLUME_PCT
+    int "Default volume (%)"
+    range 0 100
+    default 50
+    help
+        Initial audio volume percentage.
+
+endmenu

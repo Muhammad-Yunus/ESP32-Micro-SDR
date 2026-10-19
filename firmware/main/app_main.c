@@ -13,7 +13,8 @@
 #include "esp_chip_info.h"
 
 #include "bsp_esp323248s035.h"
-#include "ui_main.h"
+#include "sdr_config.h"
+#include "ui/ui_main.h"
 
 static const char *TAG = "app";
 
@@ -36,6 +37,9 @@ void app_main(void)
 
     /* LVGL port: task handler di Core 0 (CONFIG_BSP_LVGL_TASK_CORE) */
     ESP_ERROR_CHECK(bsp_lvgl_init());
+
+    /* Konfigurasi runtime (defaults dari Kconfig) — sebelum UI */
+    sdr_config_init();
 
     /* UI dasar (label frekuensi) — objek LVGL dibuat di bawah lock */
     ESP_ERROR_CHECK(ui_init());

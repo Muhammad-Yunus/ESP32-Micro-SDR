@@ -1,7 +1,9 @@
 idf_component_register(
     SRCS
         "app_main.c"
-        "ui_main.c"
+        "sdr_config.c"
+        "ui/ui_main.c"
+        "ui/font_dseg7_36.c"
     INCLUDE_DIRS
         "."
     REQUIRES
