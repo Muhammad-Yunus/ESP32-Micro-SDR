@@ -28,7 +28,7 @@ void sdr_config_init(void)
         .nco_step_hz   = 100,
         .mode          = SDR_MODE_USB,
         .volume_pct    = CONFIG_SDR_DEFAULT_VOLUME_PCT,
-        .agc_target    = 0,
+        .agc_target    = CONFIG_SDR_AGC_TARGET,
         .lo_i          = 0,
         .lo_q          = 0,
     };

@@ -135,4 +135,48 @@ config SDR_AUDIO_TONE_HZ
         production: the queue path plays demodulated audio from dsp_chain
         (F5). Keep 0 in production.
 
+config SDR_DC_POLE_R
+    float "DC-block pole radius"
+    default 0.996
+    help
+        Single-pole DC removal y[n] = x[n] - x[n-1] + R*y[n-1] per I/Q
+        channel before the NCO (docs/ARCHITECTURE.md section 6, stage 2).
+        Cutoff ~ (1-R)*fs/(2*pi) ~ 30 Hz at 48 kHz for R = 0.996.
+
+config SDR_CH_LPF_HZ
+    float "Channel LPF cutoff (Hz)"
+    default 2700.0
+    help
+        Cutoff of the channel low-pass before each decimation-by-2 stage
+        (48 -> 24 -> 12 kHz, stages 4a/4b). 2700 Hz keeps the full SSB
+        passband and rejects the alias band of each decimation stage.
+
+config SDR_AUDIO_LPF_HZ
+    float "Audio LPF cutoff (Hz)"
+    default 2000.0
+    help
+        FIR low-pass on the BFO I component at 12 kHz (stage 6): final
+        audio bandwidth before AGC.
+
+config SDR_AGC_TARGET
+    int "AGC target level (0 = AGC off)"
+    range 0 127
+    default 96
+    help
+        Desired steady-state audio peak (int8 scale) of the automatic
+        gain control (stage 7). 0 disables AGC (unity gain); the runtime
+        override lives in sdr_config agc_target.
+
+config SDR_AGC_ATTACK_MS
+    float "AGC attack time (ms)"
+    default 5.0
+    help
+        Envelope attack time constant; alpha = 1 - exp(-1/(tau*fs)).
+
+config SDR_AGC_RELEASE_MS
+    float "AGC release time (ms)"
+    default 200.0
+    help
+        Envelope release time constant; alpha = 1 - exp(-1/(tau*fs)).
+
 endmenu

@@ -15,4 +15,5 @@ idf_component_register(
         esp_adc
         esp_timer
         esp_driver_sdm
+        esp-dsp
 )

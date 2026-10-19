@@ -200,6 +200,16 @@ Catatan desain:
   BFO; jika digabung jadi satu NCO saja, LPF kanal harus ikut digeser — jangan.
 - Semua operasi per-blok (vector), bukan per-sampel panggilan library — untuk
   cache & pipeline.
+- Implementasi (F5, `dsp_chain.c`): LUT sin 1024 + interpolasi linear (cos =
+  sin + 90°); fase NCO/BFO satuan siklus, kontinu antar blok; step NCO/BFO
+  memakai `rx_adc_measured_fs_hz()` (fallback target); LPF = windowed sinc
+  Blackman yang didesain saat init (halfband-equivalent 32 tap tahap 4a/4b,
+  audio 64 tap tahap 6); keluaran `int8` di-push ke `audio_out_push` (64
+  sampel per blok 256 frame).
+- Parameter tahap §6 dikumpulkan di Kconfig (NFR-9): `SDR_DC_POLE_R`,
+  `SDR_CH_LPF_HZ`, `SDR_AUDIO_LPF_HZ`, `SDR_AGC_TARGET` (0 = AGC off),
+  `SDR_AGC_ATTACK_MS`, `SDR_AGC_RELEASE_MS`; override runtime `agc_target`
+  lewat `sdr_config`.
 
 ---
 
@@ -268,4 +278,4 @@ DILARANG:
 | UI lambat | Snapshot FFT lama di-drop — audio tetap jalan |
 | Menulis config dari UI | Critical section singkat per setter; DSP mengambil snapshot per blok |
 | Logging di Core 1 | Hanya ESP_LOGE pada event langka; tanpa log per blok steady-state |
-| Watchdog | Task WDT default; tidak ada loop tanpa blocking/pemulihan |
+| Watchdog | TWDT memantau IDLE0 (Core 0). Idle-check **Core 1 dinonaktifkan** (`CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n`): Core 1 didedikasikan streaming audio — `audio_feed_task` memutar density dengan pacing spin per-update (20,8 µs) dan hampir tidak pernah memblokir saat antrean penuh, jadi IDLE1 memang tidak dijadwalkan by-design. `sdr_rx_task` tetap memblokir pada `rx_adc_read()` (DMA). |

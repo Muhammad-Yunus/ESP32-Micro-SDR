@@ -8,6 +8,12 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 CONFIG_ADC_CONTINUOUS_ISR_IRAM_SAFE=y
 
+# Core 1 didedikasikan streaming audio: audio_feed_task memutar density
+# dengan pacing spin per-update (20,8 us) dan hampir tidak pernah memblokir
+# saat antrean penuh — IDLE1 memang tidak dijadwalkan. TWDT tetap memantau
+# IDLE0 (Core 0, LVGL/UI). Lihat docs/ARCHITECTURE.md §9.
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+
 # esp-dsp (choice symbol — pilih 2048, bukan default 4096)
 CONFIG_DSP_MAX_FFT_SIZE_2048=y
 
@@ -44,3 +50,9 @@ CONFIG_SDR_AUDIO_BLOCK_SAMPLES=256
 CONFIG_SDR_SDM_GPIO=26
 CONFIG_SDR_SDM_CARRIER_HZ=10000000
 CONFIG_SDR_AUDIO_TONE_HZ=0
+CONFIG_SDR_DC_POLE_R=0.996
+CONFIG_SDR_CH_LPF_HZ=2700.0
+CONFIG_SDR_AUDIO_LPF_HZ=2000.0
+CONFIG_SDR_AGC_TARGET=96
+CONFIG_SDR_AGC_ATTACK_MS=5.0
+CONFIG_SDR_AGC_RELEASE_MS=200.0
