@@ -18,44 +18,10 @@
 
 ---
 
-## Signal Chain (Rangkaian Sinyal)
+## Signal Chain
 
-```
-                    ┌─────────────────────────────┐
-                    │       M5 Cardputer          │
-                    │   Si5351 VFO (quadrature)   │──── LO quadrature ──┐
-                    │   (proyek terpisah, I2C)    │                      │
-                    └─────────────────────────────┘                      │
-                                                                         │
-  ┌──────────────┐     HF        ┌───────────────────┐   baseband      │
-  │  HT UVK-1    │──────────────►│  MCL ADE-1 Mixer  │────────────┌────▼────┐
-  │  (RF source) │              │  (down-sampling    │           │ TAYL    │
-  └──────────────┘               │   HF → audio)     │           │ OLE    │
-                                 └───────────────────┘           │ DETECTOR│
-                                                                 │(FST3253│
-                                                                 │ Matrix │
-                                                                 │  PCB)  │
-                                                                 └────┬────┘
-                                            baseband I/Q (audio)     │
-                                              I ──────────────────► GPIO 36 (ADC1 CH0, 48 kHz)
-                                              Q ──────────────────► GPIO 35 (ADC1 CH7, 48 kHz)
-                                                                        │
-                                                                        ▼
-                    ┌─────────────────────────────────────────────────────────┐
-                    │             ESP32-Micro-SDR (repo ini)                  │
-                    │                                                         │
-                    │  1. ADC DMA capture I/Q @48 kHz (12-bit, atten 11 dB)  │
-                    │  2. DC block IIR (R≈0.996) per kanal                   │
-                    │  3. NCO offset digital (LUT + interp, UI ±2 MHz)      │
-                    │  4. LPF 2.7 kHz → decim 48→24→12 kHz (halfband)       │
-                    │  5. Weaver SSB demod (BFO 1500 Hz, USB/LSB)           │
-                    │  6. Audio LPF 2 kHz → AGC → SDM 1-bit (GPIO26)       │
-                    │  7. FFT 1024 @12 kHz (Hann, dBFS) → spectrum chart    │
-                    │  8. Waterfall RGB565 + LVGL UI (touch, keypad)        │
-                    │                                                         │
-                    │  Audio out: SDM 1-bit 10 MHz carrier → FM8002A amp    │
-                    └─────────────────────────────────────────────────────────┘
-```
+![Signal Chain Diagram](docs/hardware/testing_diagram.jpg)
+![Signal Chain Photo](docs/hardware/testing_photo.jpg)
 
 **Blok terkait:**
 
@@ -84,20 +50,10 @@
 
 ---
 
-## Pengujian (Test Setup)
-
-Diagram & foto pengujian ada di [`docs/hardware/`](docs/hardware/):
-
-| Gambar | Isi |
-| :--- | :--- |
-| [`testing_diagram.jpg`](docs/hardware/testing_diagram.jpg) | Diagram pengujian: HT UVK-1 → MCL ADE-1 → Tayloe → ESP32 CYD, dengan M5 Cardputer Si5351 VFO |
-| [`testing_photo.jpg`](docs/hardware/testing_photo.jpg) | Foto setup pengujian |
-| [`wiring_diagram_and_schematics.jpg`](docs/hardware/wiring_diagram_and_schematics.jpg) | Wiring diagram + skema rangkaian |
-| [`Tayloe_Detector_PCB_Matrix.jpg`](docs/hardware/Tayloe_Detector_PCB_Matrix.jpg) | PCB Matrix Tayloe detector berbasis FST3253 |
-
-![Testing diagram](docs/hardware/testing_diagram.jpg)
+## Harware WIring & Schematics
 
 ![Wiring diagram and schematics](docs/hardware/wiring_diagram_and_schematics.jpg)
+![Tayloe Detector PCD Matrix](docs/hardware/Tayloe_Detector_PCB_Matrix.jpg)
 
 ---
 
