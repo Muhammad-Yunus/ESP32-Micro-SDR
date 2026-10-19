@@ -2,6 +2,9 @@ idf_component_register(
     SRCS
         "app_main.c"
         "sdr_config.c"
+        "rx_adc.c"
+        "dsp_chain.c"
+        "audio_out.c"
         "ui/ui_main.c"
         "ui/font_dseg7_36.c"
     INCLUDE_DIRS
@@ -9,5 +12,7 @@ idf_component_register(
     REQUIRES
         bsp_esp323248s035
         lvgl
+        esp_adc
         esp_timer
+        esp_driver_sdm
 )

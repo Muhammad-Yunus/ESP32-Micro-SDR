@@ -12,15 +12,12 @@
  */
 #include "ui/ui_main.h"
 
-#include <sdkconfig.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "bsp_esp323248s035.h"
 #include "lvgl.h"
 #include "sdr_config.h"
 #include "ui/ui_colors.h"
+#include <string.h>
+#include <stdint.h>
 
 /* Layout landscape 480x320 (rotation 270). */
 #define UI_W               bsp_tft_width()
@@ -200,17 +197,6 @@ static void modal_close(void)
         s_btn_entry_off = NULL;
         s_btn_entry_lo = NULL;
         lv_obj_delete_async(m);
-    }
-}
-
-static void kb_event_cb(lv_event_t *e)
-{
-    const lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_READY) {
-        keypad_apply();
-        modal_close();
-    } else if (code == LV_EVENT_CANCEL) {
-        modal_close();
     }
 }
 

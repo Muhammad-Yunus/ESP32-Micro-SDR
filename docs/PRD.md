@@ -24,7 +24,8 @@ detector (quadrature sampling detector) eksternal**.
 **Tanggung jawab firmware ini**:
 1. Sampling simultan I/Q via ADC DMA.
 2. Pemrosesan DSP (DC removal, offset tuning digital, demodulasi SSB USB/LSB, AGC).
-3. Output audio ke amplifier on-board (FM8002A via DAC1/GPIO26).
+3. Output audio ke amplifier on-board (FM8002A via GPIO26) memakai modulator
+   **sigma-delta (SDM) 1-bit** dari `esp_driver_sdm`.
 4. Visualisasi spektrum + waterfall + UI tuning via touchscreen.
 
 **Keputusan yang sudah terkunci** (jangan diubah tanpa revisi PRD ini):
@@ -32,7 +33,7 @@ detector (quadrature sampling detector) eksternal**.
 | Aspek | Keputusan |
 | :--- | :--- |
 | Platform | ESP-IDF murni v6.1, target `esp32` klasik, bahasa C |
-| Audio out | DAC internal on-board (GPIO26) via driver `dac_continuous` milik BSP |
+| Audio out | **Sigma-delta (SDM) 1-bit pada GPIO26** (`esp_driver_sdm`, output dirutekan via GPIO matrix) → input FM8002A. `dac_continuous`/`bsp_audio_init()` TIDAK dipakai karena berbagi I2S0 dengan `adc_continuous` (lihat §7) |
 | LO | Eksternal; firmware hanya menampilkan *label* frekuensi (input via keypad) + offset NCO yang di-set user |
 | Sampling | 48 kHz per kanal, span spektrum ±3 kHz |
 | LCD/touch | BSP `bsp_esp323248s035` (disalin dari repo referensi `ESP32-3248S035-CYD-SDR`) |
@@ -48,7 +49,7 @@ detector (quadrature sampling detector) eksternal**.
 | TFT MOSI/SCLK/CS/DC/BL | 13 / 14 / 15 / 2 / 27 | SPI2_HOST, 80 MHz, ST7796 |
 | TFT MISO | 12 | dipakai untuk read-back, tidak dipakai aplikasi |
 | Touch SDA/SCL | 33 / 32 | I2C0, GT911 addr 0x5D |
-| Audio out | 26 | DAC1 → FM8002A (class-AB amplifier, selalu aktif) |
+| Audio out | 26 | sinyal **SDM 1-bit** → FM8002A (class-AB amplifier, selalu aktif); DAC1 tidak dipakai |
 | RGB LED | 4 (R), 16 (G), 17 (B) | active-low |
 | microSD | 19/23/18/5 | SPI3_HOST (opsional, future) |
 | Touch INT/RST | 21 / 25 | **TIDAK dipakai driver touch** — tersedia untuk ekstensi |
@@ -70,6 +71,12 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Pembacaan non-blocking terhadap task lain (blocking hanya terhadap DMA),
   pool DMA internal ≥ 8 KB.
 - Deinterleave: CH0 → I, CH7 → Q, konversi ke float `(raw − 2048) / 2048`.
+  Catatan: urutan keluaran DMA dapat **terbalik** dari urutan array pola
+  (teramati CH7 lebih dulu); pemasangan I/Q harus **tak bergantung urutan**.
+- `CONFIG_ADC_CONTINUOUS_ISR_IRAM_SAFE=y` → callback event wajib `IRAM_ATTR`.
+- `adc_continuous_config_t.format` **deprecated/diabaikan** pada ESP32 (selalu
+  TYPE1); `bit_width` harus eksplisit (nilai enum `ADC_BITWIDTH_*`, bukan
+  `ADC_BITWIDTH_DEFAULT`); `atten` memakai enum `adc_atten_t`.
 - **Acceptance**: rate terukur dalam ±2 % dari target; pasangan I/Q per
   timestamp identik (interleaved back-to-back); counter overrun DMA = 0
   setelah 10 menit.
@@ -85,7 +92,14 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 ### FR-3 — Software Offset Frequency (NCO)
 - Pencampuran frekuensi digital: `I' = I·cos(φ) + Q·sin(φ)`,
   `Q' = Q·cos(φ) − I·sin(φ)`; akumulator fase `φ += 2π·f_offset/fs`.
-- Rentang offset: **−6 kHz … +6 kHz**; step: 10 / 50 / 100 / 500 Hz.
+- Rentang offset: **−2 MHz … +2 MHz** (`CONFIG_SDR_NCO_LIMIT_HZ`);
+  step: 10 / 50 / 100 / 500 / 1k / 10k / 100k / 1M Hz.
+  **Catatan fisika**: mixer NCO *digital* pada `fs = 48 kHz` hanya mampu
+  merealisasikan offset sampai ±24 kHz (Nyquist) dan praktis ±3 kHz (span).
+  Karena itu `SDR_NCO_LIMIT_HZ` adalah batas **rentang tuning UI / aritmetika
+  label** (`lo_label + offset`); pergeseran kasar di luar band digital harus
+  direalisasikan oleh LO eksternal (di luar firmware ini). Nilai digital yang
+  benar-benar dicampur di-clamp ke band Nyquist/span oleh DSP di F5.
 - Sumber kontrol: (a) tombol ± pada UI, (b) keypad angka LVGL (direct entry),
   (c) drag horizontal di area waterfall.
 - Lookup sin/cos (LUT ≥ 1024 entri + interpolasi linear) — tanpa trig per-sampel.
@@ -107,8 +121,9 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - AGC envelope: deteksi peak/RMS jangka pendek; attack ~5 ms, release ~200 ms;
   target level konfigurabel; gain di-clamp [g_min, g_max] dan di-smooth
   (tanpa "pumping" audible).
-- Keluaran: `int16` → pool antrean → `bsp_audio_pcm_write()` (BSP meresample
-  linear 8–48 kHz → DAC 200 kHz).
+- Keluaran: `int8` (pulse density) → `sdm_channel_set_pulse_density()` pada
+  kanal SDM (GPIO26) yang dipacu task audio berprioritas pada Core 1.
+  (Jalur `bsp_audio_pcm_write()`/`dac_continuous` tidak dipakai — bentrok I2S0.)
 - Volume user 0–100 %.
 - **Acceptance**: input −20 dBFS dan −50 dBFS menghasilkan keluaran dalam
   ±6 dB satu sama lain; tidak ada klik/dorongan saat AGC beroperasi;
@@ -200,6 +215,8 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 | Risiko | Mitigasi |
 | :--- | :--- |
 | `bsp_init()` memanggil LDR (ADC1_CH6) → bentrok dengan ADC1 DMA | **Dilarang memanggil `bsp_init()`**; gunakan inisialisasi granular (lihat CONVENTIONS.md) |
+| **Bentrok I2S0**: `adc_continuous` dan `dac_continuous` sama-sama memakai I2S0 pada ESP32 (`ADC_HAL_DMA_I2S_HOST 0`, `DAC_DMA_PERIPH_I2S_NUM 0`) → acquire kedua gagal (`ESP_ERR_NOT_FOUND`) | **Jangan pakai `dac_continuous`/`bsp_audio_init()`**; audio out lewat SDM 1-bit (GPIO26) |
+| `bsp_ldr_init()` memakai `adc_oneshot` ADC1_CH6 → bentrok dengan ADC1 continuous DMA | **Dilarang memanggil `bsp_ldr_init()`** selama ADC DMA I/Q aktif |
 | Rate ADC aktual meleset dari parameter "expected" | Ukur rate aktual; kalibrasi konstanta NCO/bin dari rate terukur |
 | RAM waterfall terlalu besar | Mulai 64 baris (60 KB); fallback 48 baris (45 KB) |
 | ADC ESP32 nonlinier/noise | Attenuation 11 dB, bias tengah, DC block, rata-rata/decim anti-alias |

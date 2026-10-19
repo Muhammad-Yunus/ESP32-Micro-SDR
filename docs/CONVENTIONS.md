@@ -89,8 +89,8 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
 - Konstanta runtime dari `Kconfig.projbuild` atau `sdr_config` — bukan angka
   ajaib di tengah kode. Angka magic hanya boleh sebagai fallback Kconfig dengan
   komentar sumber.
-- Presisi: `float` (bukan `double`) di seluruh jalur DSP; `int16_t` hanya di
-  interface audio_out ↔ BSP.
+- Presisi: `float` (bukan `double`) di seluruh jalur DSP; keluaran audio ke
+  interface `audio_out` berupa `int8_t` (pulse density SDM, 8-bit).
 - Pengujian: sediakan hook tone-injection internal (bypass ADC) untuk M2 —
   jalur test tidak boleh mengaktifkan kode di production path.
 

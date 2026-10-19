@@ -62,13 +62,33 @@ Fakta ESP32 yang harus dipatuhi implementasi:
 | Pola kanal | `adc_digi_pattern_config_t` {unit, channel, bit_width, atten} | |
 | Kanal GPIO | I = `ADC_CHANNEL_0` (GPIO36), Q = `ADC_CHANNEL_7` (GPIO35) | peta ADC ESP32 |
 | `SOC_ADC_PATT_LEN_MAX` | 16 (cukup untuk 2 kanal) | `soc_caps.h:142` |
+| `bit_width` wajib eksplisit | `ADC_BITWIDTH_DEFAULT` = 0 **ditolak** `adc_continuous_config` ("ADC bitwidth not supported") → pakai `ADC_BITWIDTH_12` | `adc_types.h:57`; `adc_continuous.c:464` |
+| `atten` = enum | Nilai dB bukan enum; wajib `adc_atten_t`. IDF v6.1: `ADC_ATTEN_DB_0=0`, `ADC_ATTEN_DB_2_5=1`, `ADC_ATTEN_DB_6=2`, `ADC_ATTEN_DB_12=3` (nama `DB_11` **tidak ada**) | `adc_types.h:47-51`; `adc_continuous.c:515` |
+| `format` deprecated | `adc_continuous_config_t.format` diabaikan di ESP32 (selalu TYPE1) | `adc_continuous.h` |
+| Urutan hasil DMA | Dapat **terbalik** dari urutan array pola (teramati CH7 sebelum CH0) → pairing I/Q tak bergantung urutan | pengamatan runtime F3 |
+| Callback ISR | `CONFIG_ADC_CONTINUOUS_ISR_IRAM_SAFE=y` → `on_conv_done`/`on_pool_ovf` wajib `IRAM_ATTR` | `adc_continuous.h` |
+| **Bentrok I2S0** | `adc_continuous` memakai I2S0 (`ADC_HAL_DMA_I2S_HOST 0`); `dac_continuous` juga (`DAC_DMA_PERIPH_I2S_NUM 0`) → acquire kedua gagal | `esp_driver_i2s/i2s_platform.c`; `esp_driver_dac/esp32/dac_dma.c` |
 
-### 4.2 Audio out — API BSP (membungkus `dac_continuous` di I2S0)
-`bsp_audio_pcm_start(uint32_t sample_rate_hz /* 8000..48000 */)`,
-`bsp_audio_pcm_write(const int16_t *frames, size_t count)` (**blocking** —
-pacing), `bsp_audio_pcm_stop()`, `bsp_audio_pcm_active()`; ditambah
-`bsp_audio_init()`, `bsp_audio_set_volume(percent)` — di `bsp_esp323248s035.h:184-245`.
-Resample internal linear ke DAC 200 kHz (Kconfig BSP). GPIO26/DAC1 → FM8002A.
+### 4.2 Audio out — `esp_driver_sdm` (sigma-delta 1-bit) di GPIO26
+**TIDAK memakai** `dac_continuous`/`bsp_audio_*` karena keduanya mengklaim I2S0
+(sama dengan `adc_continuous`, §4.1). Audio out memakai modulator sigma-delta:
+
+Fungsi: `sdm_new_channel(const sdm_config_t*, sdm_channel_handle_t*)`,
+`sdm_channel_enable/disable`, `sdm_channel_set_pulse_density(chan, int8_t)`,
+`sdm_del_channel` — `driver/sdm.h` (`esp_driver_sdm`).
+`SDM_CHANS` (kanal SDM per instance) & `SDM_CLK_SRC_DEFAULT` di `sdm_types.h`.
+
+Fakta penting (`esp_driver_sdm/src/sdm.c`):
+- Sinyal output dirutekan ke GPIO mana pun via **GPIO matrix**
+  (`gpio_matrix_output(gpio_num, sig_id_matrix, ...)`, `sdm.c:375`) — GPIO26
+  valid (output-capable). Jadi SDM tidak terbatas pada pin khusus.
+- `sample_rate_hz` = laju update modulasi (prescale dari `src_clk_hz`); untuk
+  48 kHz audio, kepadatan di-update per sampel audio di task audio.
+- Densitas = `int8_t` (−128..127) → kualitas ≈ 8-bit dengan shaping noise HF.
+  Board sudah punya FM8002A di GPIO26; idealnya tambah RC LPF di pin (bila
+  akses memungkinkan) — amp/speaker sendiri juga meredam komponen HF.
+- Bila GPIO sudah di-reserve driver lain, `sdm_new_channel` hanya memberi
+  warning (`esp_gpio_reserve`), tetap jalan.
 
 ### 4.3 Display & touch — API BSP
 `bsp_tft_init`, `bsp_tft_width/height`, `bsp_tft_set_rotation`,
@@ -135,6 +155,10 @@ board berisi 4/8 MB.
 | Sampling ADC via I2S | Tidak mungkin di IDF 6.x — gunakan `adc_continuous` (§4.1) |
 | Arduino, TFT_eSPI, LovyanGFX, U8g2 | Proyek murni ESP-IDF; display via `esp_lcd` + LVGL milik BSP |
 | `bsp_init()` | Memanggil `bsp_ldr_init()` (ADC1_CH6) yang bentrok dengan ADC1 DMA — pakai init granular (ARCHITECTURE.md §7) |
+| `bsp_ldr_init()` | Memakai `adc_oneshot` pada ADC1_CH6 → bentrok dengan ADC1 continuous DMA (F3) |
+| `dac_continuous` / `bsp_audio_init()` / `bsp_audio_pcm_*` | Mengklaim **I2S0**, sama dengan `adc_continuous` → acquire kedua gagal (`ESP_ERR_NOT_FOUND`). Audio out via SDM (§4.2) |
+| `ADC_BITWIDTH_DEFAULT` di pola ADC | Nilai 0 ditolak `adc_continuous_config` → pakai `ADC_BITWIDTH_12` |
+| `ADC_ATTEN_DB_11` (nama lama) | Tidak ada di IDF v6.1; enum-nya `ADC_ATTEN_DB_12` |
 | Memodifikasi kode BSP | Komponen dianggap stabil/black box |
 | ADC2 untuk I/Q | DMA ADC hanya didukung ADC1 di ESP32 klasik |
 | GPIO 34–39 sebagai output (LED, I2S out, dsb.) | Input-only pins |
@@ -145,12 +169,39 @@ board berisi 4/8 MB.
 
 ---
 
-## 7. Referensi resmi
+## 7. Aset font (DSEG7) — regenerasi
+
+Font 7-segmen `firmware/main/ui/font_dseg7_36.c` **dibuat otomatis** (jangan
+edit bitmap manual). Sumber: DSEG7 Classic Bold, SIL OFL 1.1 (lihat
+`docs/licenses/DSEG-OFL.txt`).
+
+Langkah regenerasi:
+
+```
+# 1. Unduh font (DSEG v0.46) dari keshikan/DSEG — pakai DSEG7Classic-Bold.ttf
+#    https://github.com/keshikan/DSEG/releases/download/v0.46/fonts-DSEG_v046.zip
+
+# 2. Konversi ke sumber LVGL (subset: spasi..'.' + digit 0-9)
+npx --yes lv_font_conv --font DSEG7Classic-Bold.ttf \
+    -r 0x20-0x2E,0x30-0x39 --format lvgl --bpp 4 --size 36 --no-compress \
+    -o firmware/main/ui/font_dseg7_36.c
+
+# 3. WAJIB: ganti include hasil generate `#include "../../lvgl.h"` menjadi
+#    `#include "lvgl.h"` agar cocok dengan include path komponen.
+```
+
+Catatan: menambah ukuran Montserrat lain (mis. 48) perlu `CONFIG_LV_FONT_*` di
+`sdkconfig.defaults` lalu `idf.py set-target esp32` ulang.
+
+---
+
+## 8. Referensi resmi
 
 - esp-dsp API: https://docs.espressif.com/projects/esp-dsp/en/latest/esp32/esp-dsp-apis.html
 - esp-dsp contoh FFT: https://github.com/espressif/esp-dsp/tree/master/examples/fft
 - esp-dsp registry: https://components.espressif.com/components/espressif/esp-dsp
 - IDF ADC & DAC: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/adc_dac.html
+- IDF SDM (sigma-delta): https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/sdm.html
 - IDF I2S (baru): https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/i2s.html
 - LVGL 9: https://docs.lvgl.io/9.x/
 - BSP Arduino asal (pin & urutan init ST7796/GT911): https://github.com/ardnew/ESP32-3248S035
@@ -160,7 +211,7 @@ board berisi 4/8 MB.
 
 ---
 
-## 8. Aturan verifikasi ketika ragu
+## 9. Aturan verifikasi ketika ragu
 
 1. Cek header di instalasi lokal:
    `C:\esp\v6.1\esp-idf\components\...\include\**\*.h` (grep simbol yang dicari).

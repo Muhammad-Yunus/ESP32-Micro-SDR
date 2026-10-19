@@ -37,8 +37,31 @@ config SDR_ADC_ATTEN_DB
     int "ADC attenuation (dB)"
     default 11
     help
-        ADC input attenuation. 11 dB matches the front-end output scaled
-        to <= +/-1 V around a 1.65 V bias.
+        ADC input attenuation, dipetakan ke enum `adc_atten_t`:
+        0 -> 0 dB, 3 -> 2.5 dB, 6 -> 6 dB, 11 -> ~12 dB (rentang penuh).
+        Nilai lain menggagalkan kompilasi (rx_adc.c). 11 dB cocok dengan
+        keluaran front-end <= +/-1 V di sekitar bias 1,65 V.
+
+config SDR_ADC_POOL_BYTES
+    int "ADC DMA internal pool (bytes)"
+    default 8192
+    help
+        Driver ring for raw conversion results; a full pool triggers the
+        overrun callback counted by rx_adc_overrun_count().
+
+config SDR_ADC_CONV_FRAME_BYTES
+    int "ADC conversion frame (bytes)"
+    default 256
+    help
+        Bytes per DMA conversion frame; must be a multiple of
+        SOC_ADC_DIGI_DATA_BYTES_PER_CONV (4 on ESP32).
+
+config SDR_ADC_BLOCK_FRAMES
+    int "DSP block size (I/Q frames)"
+    default 256
+    help
+        Frames per processed block (= 5.33 ms at 48 kHz), matching one
+        audio block of 256 samples.
 
 config SDR_DEFAULT_LO_HZ
     int "Default LO label (Hz)"
@@ -56,9 +79,10 @@ config SDR_LO_MAX_HZ
 
 config SDR_NCO_LIMIT_HZ
     int "NCO offset limit (+/- Hz)"
-    default 6000
+    default 2000000
     help
-        Maximum software offset tuning range.
+        Maximum software offset tuning range, applied around the LO label
+        (default 2 MHz). The UI clamps keypad entry to +/- this value.
 
 config SDR_DEFAULT_VOLUME_PCT
     int "Default volume (%)"
@@ -66,5 +90,49 @@ config SDR_DEFAULT_VOLUME_PCT
     default 50
     help
         Initial audio volume percentage.
+
+config SDR_AUDIO_FS_HZ
+    int "Audio output sample rate (Hz)"
+    default 12000
+    help
+        Rate of the demodulated audio stream feeding the sigma-delta
+        modulator; also the pacing rate of audio_feed_task (one density
+        update per sample period).
+
+config SDR_AUDIO_BLOCK_SAMPLES
+    int "Audio block size (samples)"
+    default 256
+    help
+        Samples per queued audio block (~21.3 ms at 12 kHz), see
+        docs/ARCHITECTURE.md section 4.
+
+config SDR_SDM_GPIO
+    int "Sigma-delta output GPIO"
+    default 26
+    help
+        GPIO routed via the GPIO matrix to the sigma-delta modulator;
+        the board wires GPIO26 to the FM8002A amplifier.
+
+config SDR_SDM_CARRIER_HZ
+    int "Sigma-delta carrier rate (Hz)"
+    default 10000000
+    help
+        Pulse rate of the 1-bit modulator (must exceed every test/audio
+        frequency by a wide margin). The driver derives an integer
+        prescaler from the 80 MHz APB clock and warns on precision loss;
+        10 MHz divides exactly (prescaler 8) and matches the Espressif
+        sdm_dac audio example.
+
+config SDR_AUDIO_TONE_HZ
+    int "Internal test tone frequency (Hz, 0 = off)"
+    range 0 1000000
+    default 0
+    help
+        When non-zero, audio_feed_task synthesizes a continuous-phase
+        sine of this frequency directly at the SDM write rate (online
+        calibrated — bring-up/diag of the SDM/amp path, F4). Amplitude
+        follows the volume control (sdr_config volume_pct). 0 =
+        production: the queue path plays demodulated audio from dsp_chain
+        (F5). Keep 0 in production.
 
 endmenu

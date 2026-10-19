@@ -1,7 +1,18 @@
+/*
+ * SPDX-License-Identifier: OFL-1.1
+ *
+ * Font: DSEG7 Classic Bold (subset digit/seven-segment glyphs).
+ * Copyright (c) 2017-2023 keshikan (https://github.com/keshikan/DSEG)
+ * Licensed under the SIL Open Font License, Version 1.1 — see the bundled
+ * OFL license: docs/licenses/DSEG-OFL.txt (fonts-DSEG_v046 / DSEG7-Classic).
+ *
+ * Generated file — DO NOT EDIT BY HAND. Regeneration steps:
+ * docs/TECH_STACK.md §7 (lv_font_conv).
+ */
 /*******************************************************************************
  * Size: 36 px
  * Bpp: 4
- * Opts: --font C:\Users\Asus\AppData\Local\Temp\opencode\dseg\fonts-DSEG_v046\DSEG7-Classic\DSEG7Classic-Bold.ttf -r 0x20-0x2E,0x30-0x39 --format lvgl --bpp 4 --size 36 --no-compress -o C:\D\DOCUMENT_BCK\GitHub\ESP32-Micro-SDR\firmware\main\ui\font_dseg7_36.c
+ * Opts: --font DSEG7Classic-Bold.ttf -r 0x20-0x2E,0x30-0x39 --format lvgl --bpp 4 --size 36 --no-compress -o font_dseg7_36.c
  ******************************************************************************/
 
 #include "lvgl.h"

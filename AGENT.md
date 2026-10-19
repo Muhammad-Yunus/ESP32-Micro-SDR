@@ -23,8 +23,11 @@ isi fitur; untuk ketersediaan API/pustaka, TECH_STACK yang menang mutlak.
 2. **Ikuti batas modul** `ARCHITECTURE.md` §3 — jangan memindahkan tanggung
    jawab antar file, jangan menambah task/core/prioritas di luar tabel §2.
 3. **DILARANG memanggil `bsp_init()`** (memanggil LDR → bentrok dengan ADC1
-   DMA). Gunakan init granular sesuai `ARCHITECTURE.md` §7. Komponen BSP
-   `bsp_esp323248s035` = **black box**, jangan dimodifikasi.
+   DMA), **`bsp_ldr_init()`** (`adc_oneshot` ADC1_CH6 → bentrok ADC1 DMA),
+   dan **`bsp_audio_init()`/`bsp_audio_pcm_*`** (`dac_continuous` → mengklaim
+   I2S0, sama dengan `adc_continuous` → acquire gagal). Gunakan init granular
+   sesuai `ARCHITECTURE.md` §7. Komponen BSP `bsp_esp323248s035` = **black
+   box**, jangan dimodifikasi.
 4. **Bahasa C11, ESP-IDF v6.1 murni** — tanpa Arduino, tanpa pustaka yang
    tidak terdaftar di `TECH_STACK.md`.
 5. **DILARANG `driver/i2s.h` legacy / I2S-ADC** — sampling I/Q hanya via
@@ -52,9 +55,10 @@ isi fitur; untuk ketersediaan API/pustaka, TECH_STACK yang menang mutlak.
 
 ## Konteks proyek singkat (lihat PRD untuk lengkapnya)
 
-- Board: ESP32-3248S035 (ST7796 480×320 + GT911 + DAC1/FM8002A di GPIO26).
+- Board: ESP32-3248S035 (ST7796 480×320 + GT911 + FM8002A di GPIO26).
 - Sinyal I/Q dari Tayloe detector **eksternal**; LO (Si5351) dikontrol alat
   terpisah — firmware ini hanya memproses audio I/Q + menampilkan/menyetel
   offset NCO via UI.
 - Sampling: 48 kHz/kanal; demod SSB USB/LSB (Weaver); keluaran audio via
-  `bsp_audio_pcm_*` (DAC internal).
+  **modulator sigma-delta (SDM) 1-bit di GPIO26** (`esp_driver_sdm`) —
+  bukan `dac_continuous` (bentrok I2S0; lihat TECH_STACK §4.2/§6).
