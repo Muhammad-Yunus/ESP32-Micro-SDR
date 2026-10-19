@@ -122,12 +122,12 @@ uint32_t  audio_out_update_count(void);            // total update density (diag
 
 /* spectrum.h */
 esp_err_t spectrum_init(void);                     // dsps_fft2r_init_fc32 + window + pool
-void      spectrum_ingest(const iq_t *snapshot1024); // panggil di Core 0
+void      spectrum_ingest(const iq_t *snapshot1024); // panggil di Core 1 (dsp_chain)
 bool      spectrum_get_db(float *out_db, int *out_nbins); // drain terbaru → UI
 
 /* sdr_config.h (lintas core) */
 typedef struct {
-    int32_t lo_label_hz;        // label visual, default 7030000 (bukan LO riil!)
+    int32_t lo_label_hz;        // label visual, default 20000000 (bukan LO riil!)
     int32_t nco_offset_hz;      // −CONFIG_SDR_NCO_LIMIT_HZ..+limit (default 2 MHz)
     int32_t nco_step_hz;        // 10/50/100/500/1k/10k/100k/1M
     uint8_t mode;               // SDR_MODE_USB / SDR_MODE_LSB
@@ -249,13 +249,13 @@ DILARANG:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ 7.030.000  [+1.200]  USB   S7   vol ▮▮▮▯▯                 │  ~40 px
+│ 20.000.000  [+1.200]  USB   S7   vol ▮▮▮▯▯                │  ~40 px
+├────────────────────────────────────────────────────────────┤
+│ |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||| ||||| │  ~136 px (bar spektrum)
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │              WATERFALL (canvas 464 × 64, RGB565)           │  ~64 px + margin
 │                                                            │
-├────────────────────────────────────────────────────────────┤
-│ |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||| ||||| │  ~80 px (bar spektrum)
 ├────────────────────────────────────────────────────────────┤
 │ [USB/LSB]  [−] [+]  step 100  [Keypad]  [Vol−] [Vol+]     │  ~56 px
 └────────────────────────────────────────────────────────────┘

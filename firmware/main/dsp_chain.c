@@ -30,6 +30,7 @@
 #include "audio_out.h"
 #include "rx_adc.h"
 #include "sdr_config.h"
+#include "spectrum.h"
 
 static const char *TAG = "sdr_rx";
 
@@ -75,6 +76,11 @@ static float s_agc_env;
 static float s_agc_gain;
 static float s_agc_alpha_a;
 static float s_agc_alpha_r;
+
+/* F6: snapshot pasca-NCO untuk spektrum (1024 frame @12 kHz). */
+#define DSP_SP_N              CONFIG_SDR_FFT_N
+static iq_t s_sp_snap[DSP_SP_N];
+static int  s_sp_cnt;
 
 /* Buffer kerja per blok (BSS — bukan stack task). */
 static iq_t s_block[DSP_BLOCK_FRAMES];
@@ -259,6 +265,16 @@ static void dsp_process_block(const iq_t *in, size_t frames)
     dsps_fird_f32(&s_fir_hb2_i, s_f24_i, s_f12_i, n12);
     dsps_fird_f32(&s_fir_hb2_q, s_f24_q, s_f12_q, n12);
 
+    /* Tahap 4c (F6): akumulasi snapshot pasca-NCO untuk spektrum. */
+    for (int k = 0; k < n12; k++) {
+        s_sp_snap[s_sp_cnt].i = s_f12_i[k];
+        s_sp_snap[s_sp_cnt].q = s_f12_q[k];
+        if (++s_sp_cnt == DSP_SP_N) {
+            spectrum_ingest(s_sp_snap);
+            s_sp_cnt = 0;
+        }
+    }
+
     /* Tahap 5: BFO ke-2 — pemilih sideband (I' = audio setelah mix). */
     const float bfo_hz =
         (cfg.mode == SDR_MODE_LSB) ? (float)CONFIG_SDR_BFO_HZ
@@ -331,6 +347,7 @@ void dsp_chain_reset(void)
     s_bfo_phase = 0.0f;
     s_agc_env = 0.0f;
     s_agc_gain = 1.0f;
+    s_sp_cnt = 0;
 
     memset(s_dl_hb1_i, 0, sizeof(s_dl_hb1_i));
     memset(s_dl_hb1_q, 0, sizeof(s_dl_hb1_q));

@@ -7,15 +7,17 @@
  * and sdr_config_set_* — never ADC, DSP or bsp_audio_pcm_write().
  *
  * F2 scope: top frequency bar (FR-8), bottom control bar + numeric keypad
- * modal (FR-3 sources a/b, FR-9). Waterfall/spectrum area is a placeholder
- * until F6.
+ * modal (FR-3 sources a/b, FR-9).
+ * F6 scope: spectrum bar + waterfall via ui_scope_init() (FR-6).
  */
 #include "ui/ui_main.h"
 
 #include "bsp_esp323248s035.h"
+#include "esp_log.h"
 #include "lvgl.h"
 #include "sdr_config.h"
 #include "ui/ui_colors.h"
+#include "ui/ui_scope.h"
 #include <string.h>
 #include <stdint.h>
 
@@ -150,6 +152,11 @@ static void update_freq_bar(void)
     lv_label_set_text(s_label_step_btn, step);
 
     update_vol_indicator(cfg.volume_pct);
+}
+
+void ui_main_refresh_freq(void)
+{
+    update_freq_bar();
 }
 
 /* ------------------------------------------------------------------ */
@@ -864,12 +871,10 @@ esp_err_t ui_init(void)
     lv_obj_set_style_text_font(s_label_vol_pct, &lv_font_montserrat_14, 0);
     lv_label_set_text(s_label_vol_pct, "0%");
 
-    /* ---- Placeholder for scope area (F6: waterfall + spectrum) ---- */
-    lv_obj_t *hint = lv_label_create(scr);
-    lv_label_set_text(hint, "ESP32-Micro-SDR");
-    lv_obj_set_style_text_color(hint, ui_col_dim(), 0);
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_24, 0);
-    lv_obj_align(hint, LV_ALIGN_CENTER, 0, -20);
+    /* ---- F6: spectrum bar + waterfall (FR-6) ---- */
+    if (ui_scope_init(scr) != ESP_OK) {
+        ESP_LOGW("ui", "ui_scope_init gagal — spectrum/waterfall tidak tampil");
+    }
 
     /* ---- Bottom control bar (FR-9) ---- */
     lv_obj_t *bot = lv_obj_create(scr);

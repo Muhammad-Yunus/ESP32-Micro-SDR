@@ -146,7 +146,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   frame-rate collapse saat UI disentuh.
 
 ### FR-8 — Tampilan Frekuensi
-- Bar atas menampilkan: frekuensi utama (label LO, default `7.030.000`,
+- Bar atas menampilkan: frekuensi utama (label LO, default `20.000.000`,
   **diinput user via keypad — murni label visual** karena LO riil dikontrol
   alat terpisah) + offset NCO (mis. `[+1.200]`).
 - Frekuensi aktual yang dirujuk = `lo_label + nco_offset`.

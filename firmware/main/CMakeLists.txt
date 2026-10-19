@@ -5,7 +5,10 @@ idf_component_register(
         "rx_adc.c"
         "dsp_chain.c"
         "audio_out.c"
+        "spectrum.c"
         "ui/ui_main.c"
+        "ui/ui_scope.c"
+        "ui/ui_colors.c"
         "ui/font_dseg7_36.c"
     INCLUDE_DIRS
         "."

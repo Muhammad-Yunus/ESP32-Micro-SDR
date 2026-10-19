@@ -19,6 +19,7 @@
 #include "dsp_chain.h"
 #include "rx_adc.h"
 #include "sdr_config.h"
+#include "spectrum.h"
 #include "ui/ui_main.h"
 
 static const char *TAG = "app";
@@ -48,6 +49,9 @@ void app_main(void)
 
     /* Rantai DSP (state; tahap §6 menyusul di F5) */
     ESP_ERROR_CHECK(dsp_chain_init());
+
+    /* Spectrum FFT (F6) — pool snapshot + tabel FFT esp-dsp */
+    ESP_ERROR_CHECK(spectrum_init());
 
     /*
      * Audio out: SDM (sigma-delta) 1-bit di GPIO26 — BUKAN

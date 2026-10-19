@@ -6,6 +6,8 @@
  */
 #pragma once
 
+#include <stdint.h>
+
 #include "lvgl.h"
 
 /* Screen & chrome */
@@ -39,3 +41,14 @@ static inline lv_color_t ui_col_lcd_fg(void)     { return lv_color_hex(0x3CFF70)
 /* Top-bar mode chip/badge. */
 static inline lv_color_t ui_col_chip(void)       { return lv_color_hex(0x1E7AB0); }
 static inline lv_color_t ui_col_chip_press(void) { return lv_color_hex(0x2E8FC6); }
+
+/* Waterfall colormap (F6): LUT 32 entri RGB565 mentah (uint16_t) —
+ * black → biru → cyan → kuning → merah; didefinisikan di ui_colors.c.
+ * Nilai mentah dipakai langsung sebagai piksel lv_canvas RGB565. */
+#define UI_WF_LUT_N        32
+extern const uint16_t ui_wf_lut[UI_WF_LUT_N];
+
+static inline uint16_t ui_wf_color(int idx)
+{
+    return ui_wf_lut[idx & (UI_WF_LUT_N - 1)];
+}
