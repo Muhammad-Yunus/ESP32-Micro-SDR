@@ -1,0 +1,17 @@
+## Managed components
+firmware/managed_components/
+firmware/dependencies.lock
+
+## Build artifacts
+firmware/build/
+
+## ESP-IDF generated config
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+## Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,142 @@
+menu "BSP ESP32-3248S035"
+
+    config BSP_TFT_SPI_CLK_HZ
+        int "ST7796 SPI clock frequency (Hz)"
+        range 1000000 80000000
+        default 80000000
+        help
+            SPI clock used for the display. The original Arduino BSP runs the
+            panel at 80 MHz.
+
+    choice BSP_TFT_ROTATION
+        prompt "Default display rotation"
+        default BSP_TFT_ROTATION_270
+        help
+            Rotation applied at initialization. 270 degrees corresponds to the
+            native "wide" (landscape) orientation of the Arduino BSP
+            (MADCTL = 0xE0).
+
+        config BSP_TFT_ROTATION_0
+            bool "0 degrees (portrait)"
+        config BSP_TFT_ROTATION_90
+            bool "90 degrees (landscape)"
+        config BSP_TFT_ROTATION_180
+            bool "180 degrees (portrait inverted)"
+        config BSP_TFT_ROTATION_270
+            bool "270 degrees (landscape inverted, default)"
+    endchoice
+
+    config BSP_TFT_BACKLIGHT_DEFAULT
+        int "Default backlight brightness (percent)"
+        range 0 100
+        default 100
+
+    config BSP_LVGL
+        bool "Enable the LVGL port"
+        default y
+        help
+            Create a display, an input device, a tick timer and a handler task
+            for LVGL 9. Requires the lvgl/lvgl component (see
+            idf_component.yml).
+
+    if BSP_LVGL
+
+        config BSP_LVGL_BUFFER_LINES
+            int "LVGL draw buffer height (lines)"
+            range 1 80
+            default 10
+            help
+                Number of display lines per draw buffer. Two buffers of
+                (rotated width x this value) are allocated in DMA capable RAM.
+
+        config BSP_LVGL_TICK_MS
+            int "LVGL tick period (ms)"
+            range 1 100
+            default 10
+
+        config BSP_LVGL_TASK_PERIOD_MS
+            int "LVGL handler task period (ms)"
+            range 1 100
+            default 20
+
+        config BSP_LVGL_TASK_PRIORITY
+            int "LVGL handler task priority"
+            default 4
+
+        config BSP_LVGL_TASK_STACK
+            int "LVGL handler task stack size (bytes)"
+            default 6144
+
+        config BSP_LVGL_TASK_CORE
+            int "LVGL handler task core"
+            range 0 1
+            default 0
+            help
+                CPU the LVGL handler task is pinned to. Keep it on the opposite
+                core from the ADC sampling task to spread the load.
+    endif
+
+    config BSP_LDR_POLL_HZ
+        int "LDR ADC polling frequency (Hz)"
+        range 50 5000
+        default 1000
+        help
+            How often the LDR task reads ADC1 channel 6 (one-shot mode).
+            One-shot reads are used instead of the continuous/DMA driver
+            because the DAC continuous audio engine owns I2S0 on the ESP32.
+            Higher rates give better oversampling; samples are averaged and
+            published every 5 ms.
+
+    config BSP_LDR_TASK_CORE
+        int "LDR sampling task core"
+        range 0 1
+        default 1
+        help
+            CPU the LDR polling task is pinned to.
+
+    choice BSP_AMP_DRIVER
+        prompt "GPIO26 amplifier driver"
+        default BSP_AMP_DRIVER_DAC
+        help
+            GPIO26 is DAC channel 1 and drives the on-board FM8002A class-AB
+            audio amplifier (always powered, no enable pin). It can be driven
+            either as a square-wave "buzzer" with LEDC, or with the DAC in
+            continuous DMA mode for real analogue audio.
+
+        config BSP_AMP_DRIVER_BUZZER
+            bool "LEDC square-wave buzzer"
+        config BSP_AMP_DRIVER_DAC
+            bool "DAC continuous (DMA) sine / audio"
+    endchoice
+
+    if BSP_AMP_DRIVER_DAC
+        config BSP_AUDIO_SAMPLE_RATE_HZ
+            int "DAC audio sample rate (Hz)"
+            range 40000 2000000
+            default 200000
+            help
+                DAC continuous (DMA) sample rate. Must exceed twice the highest
+                tone (the UI slider goes up to 1500 Hz), hence at least 3 kHz.
+
+        config BSP_AUDIO_TASK_CORE
+            int "Audio generation task core"
+            range 0 1
+            default 1
+
+        config BSP_AUDIO_BUF_SAMPLES
+            int "Samples generated per DMA write"
+            range 256 16384
+            default 4096
+
+        config BSP_AUDIO_AMPLITUDE
+            int "Sine amplitude (0..127)"
+            range 1 127
+            default 100
+
+        config BSP_AUDIO_DEFAULT_FREQ_HZ
+            int "Default tone frequency (Hz)"
+            range 20 1500
+            default 320
+    endif
+
+endmenu

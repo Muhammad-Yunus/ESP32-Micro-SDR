@@ -1,0 +1,11 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "ui_main.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        bsp_esp323248s035
+        lvgl
+        esp_timer
+)
