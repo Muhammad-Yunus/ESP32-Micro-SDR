@@ -52,3 +52,13 @@ static inline uint16_t ui_wf_color(int idx)
 {
     return ui_wf_lut[idx & (UI_WF_LUT_N - 1)];
 }
+
+/* Spectrum line chart + peak marker (F6). */
+static inline lv_color_t ui_col_scope_line(void) { return lv_color_hex(0x66D9FF); }
+static inline lv_color_t ui_col_peak(void)       { return lv_color_hex(0xFF2A2A); }
+static inline lv_color_t ui_col_peak_fg(void)    { return lv_color_hex(0x000000); }
+static inline lv_color_t ui_col_grid(void)       { return lv_color_hex(0x33414D); }
+static inline lv_color_t ui_col_grid_dc(void)    { return lv_color_hex(0x4C6473); }
+static inline lv_color_t ui_col_grid_text(void)  { return lv_color_hex(0x9FB2C0); }
+/* Garis floor riil (minimum spektrum, bisa di bawah skala). */
+static inline lv_color_t ui_col_floor(void)      { return lv_color_hex(0xFF8C00); }

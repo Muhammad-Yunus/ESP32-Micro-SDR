@@ -11,6 +11,9 @@
  *
  * Input I/Q kompleks: TIDAK memakai dsps_cplx2reC (itu untuk trik FFT
  * data real); magnitude per bin dihitung langsung dari interleaved.
+ *
+ * Skala: dBFS relatif penuh (0 dB = tone full-scale I/Q ±1.0 pasca-NCO,
+ * pra-BFO). UI menampilkan angka dBFS apa adanya (tanpa offset kalibrasi).
  */
 #include "spectrum.h"
 
@@ -30,7 +33,13 @@ static const char *TAG = "spectrum";
 
 #define SP_N        CONFIG_SDR_FFT_N          /* 1024 titik               */
 #define SP_POOL     3                         /* slot snapshot (§4)       */
-#define SP_EPS      1e-12f                    /* floor log                */
+/* Floor log: (re²+im²) dijaga agar ≥ 1e-12; output dBFS di-clamp ke
+ * −148 (di bawah noise floor riil) agar nilai minimum bukan artifact. */
+#define SP_EPS      1e-12f
+#define SP_DBFLOOR  (-148.0f)
+
+/* Referensi full-scale: tone I/Q = ±1.0 (ADC penuh pasca-NCO). */
+#define SP_FS_REFS   (20.0f * log10f((2.0f * (float)SP_N) / 4.0f))
 
 /* Pool: 3 slot heap internal (24 KB total) + dua antrean pointer. */
 static QueueHandle_t s_free_q;                /* iq_t* kosong             */
@@ -123,12 +132,17 @@ bool spectrum_get_db(float *out_db, int *out_nbins)
     dsps_fft2r_fc32(s_fft, SP_N);
     dsps_bit_rev_fc32(s_fft, SP_N);
 
-    /* dB per bin dalam urutan display: j=0 → bin −N/2, j=N/2 → DC. */
+    /* dBFS per bin dalam urutan display: j=0 → bin −N/2, j=N/2 → DC.
+     * 0 dBFS = tone full-scale I/Q ±1.0; clamp bawah = SP_DBFLOOR. */
     for (int j = 0; j < SP_N; j++) {
         const int k = (j < SP_N / 2) ? (j + SP_N / 2) : (j - SP_N / 2);
         const float re = s_fft[2 * k];
         const float im = s_fft[2 * k + 1];
-        out_db[j] = 10.0f * log10f(re * re + im * im + SP_EPS);
+        float v = 10.0f * log10f(re * re + im * im + SP_EPS) - SP_FS_REFS;
+        if (v < SP_DBFLOOR) {
+            v = SP_DBFLOOR;
+        }
+        out_db[j] = v;
     }
 
     *out_nbins = SP_N;

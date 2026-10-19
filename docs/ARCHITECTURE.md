@@ -251,7 +251,7 @@ DILARANG:
 ┌────────────────────────────────────────────────────────────┐
 │ 20.000.000  [+1.200]  USB   S7   vol ▮▮▮▯▯                │  ~40 px
 ├────────────────────────────────────────────────────────────┤
-│ |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||| ||||| │  ~136 px (bar spektrum)
+│ |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||| ||||| │  ~136 px (spektrum line chart)
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │              WATERFALL (canvas 464 × 64, RGB565)           │  ~64 px + margin
@@ -263,7 +263,20 @@ DILARANG:
 
 - Waterfall: `lv_canvas` RGB565 464×64 (≈ 60 KB); update = `memmove` turun
   satu baris + gambar baris baru + invalidate. Fallback RAM: 48 baris.
-- Spektrum: digambar pada event `LV_EVENT_DRAW_MAIN` (tanpa buffer penuh).
+- Spektrum: line chart biru muda 1 px digambar pada event `LV_EVENT_DRAW_MAIN`
+  (polyline 464 titik, tanpa buffer penuh). Tampilan zoom ±`SDR_DISPLAY_SPAN_HZ`
+  (≈1 bin/piksel; 512 bin untuk 464 px), nilai piksel = maksimum bin dalam
+  rentangnya — bukan point-sampling/interpolasi, jadi tekstur noise natural.
+  Puncak ditandai garis vertikal merah + chip merah (teks hitam, radius 0)
+  berisi frekuensi puncak (`lo_label_hz + nco_offset_hz + offset bin`),
+  diposisikan di samping marker. Waterfall memakai pemetaan yang sama.
+- Skala Y spektrum: **dBFS**, rentang tetap −100…+10 (grid + label tiap
+  20 dB di sisi kanan, satuan `dBFS` di pojok). Nilai di bawah −100
+  ter-clamp ke dasar chart (bukan overflow). Garis floor riil oranye:
+  minimum spektrum per frame; bila di bawah −100 garis ter-clamp ke dasar
+  chart dan label kiri menunjukkan nilai aktualnya. Nilai dBFS di-clamp
+  bawah −148 (di bawah noise floor riil) agar nilai minimum bukan
+  artifact floor log FFT.
 - Drag horizontal di waterfall mengubah `nco_offset_hz` sesuai span ±3 kHz.
 - Keypad LVGL mengubah `nco_offset_hz` atau `lo_label_hz` (mode entry dipilih
   tombol).
