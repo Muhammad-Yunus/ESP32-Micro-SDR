@@ -27,7 +27,7 @@
 
 | Blok | Peran | Link |
 | :--- | :--- | :--- |
-| HT UVK-1 | Sumber sinyal HF yang di-down-sampling | — |
+| HT UV-K1 | Sumber sinyal HF yang di-down-sampling | — |
 | MCL ADE-1 | Mixer down-sampling HF → baseband audio | — |
 | M5 Cardputer Si5351 VFO | LO quadrature (90°) untuk Tayloe detector, dikontrol terpisah (I2C M5) | [repo](https://github.com/Muhammad-Yunus/M5Cardputer-Si5351-VFO) |
 | Tayloe Detector (DIY) | Quadrature sampling detector berbasis FST3253, PCB Matrix | — |
