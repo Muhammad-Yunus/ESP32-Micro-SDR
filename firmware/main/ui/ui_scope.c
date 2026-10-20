@@ -26,16 +26,20 @@
 #include "ui/ui_colors.h"
 #include "ui/ui_main.h"
 
-/* Geometri area scope (480x320 landscape, top 52 / bottom 56). */
-#define SCOPE_X            8
-#define SCOPE_Y            (52 + 6)
-#define SCOPE_W            464
-#define WF_H               64
-#define WF_FALLBACK_ROWS   48
-#define BAR_GAP            4
-#define BAR_H              136
+/* Geometri area scope (480x320 landscape, top 52 / bottom 56).
+ * Strip sumbu: kiri 30 px (label dBFS) + bawah 18 px (label Hz), di luar
+ * area plot. Plot = 422×128. */
+#define SCOPE_X            38
+#define SCOPE_Y            (52 + 4)
+#define SCOPE_W            422
+#define YLABEL_W          30
+#define XLABEL_H          18
+#define WF_H               44
+#define WF_FALLBACK_ROWS   44
+#define BAR_GAP            2
+#define BAR_H              128
 #define BAR_Y              SCOPE_Y
-#define WF_Y               (BAR_Y + BAR_H + BAR_GAP)
+#define WF_Y               (BAR_Y + BAR_H + XLABEL_H + BAR_GAP)
 
 /* Peta dBFS → tinggi/warna: atas +10 (penuh); dasar DYNAMIS =
  * minimum spektrum − 20 dB (clamp [−200, 0]) sehingga nilai minimum
@@ -95,7 +99,7 @@ static float db_frac(float db)
 }
 
 /* Rentang bin untuk kolom piksel x: zoom ke ±SDR_DISPLAY_SPAN_HZ —
- * ~1 bin/piksel (1024 bin → 512 bin untuk ±3 kHz di 464 px), sehingga
+ * ~1 bin/piksel (1024 bin → 168 bin untuk ±500 Hz di 422 px), sehingga
  * tidak ada bin yang dilewati (bukan point-sampling/interpolasi). */
 static void scope_bin_range(int x, int nbins, int *k0, int *k1)
 {
@@ -282,46 +286,52 @@ static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
     td.font = &lv_font_montserrat_10;
     td.align = LV_TEXT_ALIGN_RIGHT;
 
-    /* Satuan sumbu Y di pojok kanan atas. */
+    /* Satuan sumbu Y di strip kiri, sejajar tepi atas plot. */
     lv_area_t unit = {
-        .x1 = coords->x2 - 32,
-        .y1 = coords->y1 + 1,
-        .x2 = coords->x2 - 2,
-        .y2 = coords->y1 + 12,
+        .x1 = coords->x1 - YLABEL_W,
+        .y1 = coords->y1,
+        .x2 = coords->x1 - 1,
+        .y2 = coords->y1 + 11,
     };
     lv_draw_rect(layer, &bg, &unit);
     td.text = "dBFS";
     lv_draw_label(layer, &td, &unit);
 
+    /* Label dBFS di strip kiri, di luar tepi grid chart (align kanan,
+     * menempel tepi kiri plot). */
     for (int i = 0; i < n_marks; i++) {
         const int32_t y = coords->y2 -
             (int32_t)(db_frac((float)db_marks[i]) * (float)(h - 1));
         lv_area_t a = {
-            .x1 = coords->x2 - 32,
+            .x1 = coords->x1 - YLABEL_W,
             .y1 = y - 6,
-            .x2 = coords->x2 - 2,
+            .x2 = coords->x1 - 1,
             .y2 = y + 6,
         };
+        if (a.x1 < 0) {
+            a.x1 = 0;
+        }
         lv_draw_rect(layer, &bg, &a);
         td.text = y_text[i];
         lv_draw_label(layer, &td, &a);
     }
 
+    /* Label Hz di strip bawah, di luar tepi grid chart (center per tick). */
     td.align = LV_TEXT_ALIGN_CENTER;
     for (size_t i = 0; i < 5; i++) {
         const int32_t x = freq_to_x(hz_marks[i]);
-        /* "20.000 M" 8 karakter @Montserrat 10 ≈ 48 px; lebar ±25 px. */
+        /* "20.000 M" 8 karakter @Montserrat 10 ≈ 48 px; lebar ±24 px. */
         lv_area_t a = {
-            .x1 = x - 25,
-            .y1 = coords->y2 - 12,
-            .x2 = x + 25,
-            .y2 = coords->y2 - 1,
+            .x1 = x - 24,
+            .y1 = coords->y2 + 1,
+            .x2 = x + 24,
+            .y2 = coords->y2 + 1 + XLABEL_H - 1,
         };
-        if (a.x1 < coords->x1) {
-            a.x1 = coords->x1;
+        if (a.x1 < 0) {
+            a.x1 = 0;
         }
-        if (a.x2 > coords->x2) {
-            a.x2 = coords->x2;
+        if (a.x2 > 480) {
+            a.x2 = 480;
         }
         lv_draw_rect(layer, &bg, &a);
         td.text = x_text[i];
