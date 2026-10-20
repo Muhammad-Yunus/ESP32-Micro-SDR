@@ -333,11 +333,12 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
     td.align = LV_TEXT_ALIGN_CENTER;
     for (size_t i = 0; i < 5; i++) {
         const int32_t x = pr->x1 + freq_to_x(hz_marks[i]);
-        /* "20.000 M" 8 karakter @Montserrat 10 ≈ 48 px; lebar ±24 px. */
+        /* "20.000 M" 8 karakter @Montserrat 10 ≈ 46 px; box ±32 px (64 px)
+         * cukup untuk semua label tanpa wrap, termasuk yang di-clamp. */
         lv_area_t a = {
-            .x1 = x - 24,
+            .x1 = x - 32,
             .y1 = pr->y2 + 1,
-            .x2 = x + 24,
+            .x2 = x + 32,
             .y2 = pr->y2 + XLABEL_H,
         };
         if (a.x1 < pr->x1) {
