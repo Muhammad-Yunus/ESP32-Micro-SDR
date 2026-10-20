@@ -42,10 +42,10 @@
 #define WF_Y               (BAR_Y + BAR_H + XLABEL_H + BAR_GAP)
 
 /* Peta dBFS → tinggi/warna: atas +10 (penuh); dasar DYNAMIS =
- * minimum spektrum − 20 dB (clamp [−200, 0]) sehingga nilai minimum
- * spektrum selalu melayang ~20 dB di atas dasar chart. */
+ * p25 (persentil 25 noise floor) − 40 dB (clamp [−180, 0]) sehingga
+ * seluruh titik spektrum selalu melayang 40 dB di atas dasar chart. */
 #define SCOPE_DB_MAX       (10.0f)
-#define SCOPE_FLOOR_ABOVE  (20.0f)   /* headroom min spektrum di atas dasar */
+#define SCOPE_FLOOR_ABOVE  (40.0f)   /* headroom floor riil di atas dasar */
 #define SCOPE_DB_MIN_FLOOR (-200.0f) /* clamp dasar chart terdalam        */
 #define SCOPE_DB_MIN_CEIL   (0.0f)   /* clamp dasar chart teratas         */
 
@@ -524,10 +524,10 @@ static void update_peak(const float *db, int nbins)
     }
     const float floor_est = s_px_vals[p25_idx];   /* p25 ≈ noise floor */
 
-    /* Dasar chart dinamis: p25 − 20 dB headroom, clamp [−160, 0]. */
+    /* Dasar chart dinamis: p25 − 40 dB headroom, clamp [−180, 0]. */
     float chart_min = floor_est - SCOPE_FLOOR_ABOVE;
-    if (chart_min < -160.0f) {
-        chart_min = -160.0f;
+    if (chart_min < -180.0f) {
+        chart_min = -180.0f;
     } else if (chart_min > SCOPE_DB_MIN_CEIL) {
         chart_min = SCOPE_DB_MIN_CEIL;
     }
