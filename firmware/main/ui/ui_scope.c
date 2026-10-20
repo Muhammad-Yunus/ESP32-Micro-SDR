@@ -85,10 +85,11 @@ static float db_frac(float db)
 {
     const float lo = s_db_min;
     const float hi = SCOPE_DB_MAX;
-    if (hi - lo < 1.0f) {
-        return (db > hi) ? 1.0f : 0.0f;
+    const float range = hi - lo;
+    if (range < 1.0f) {
+        return (db >= hi) ? 1.0f : 0.0f;
     }
-    float f = (db - lo) / (hi - lo);
+    float f = (db - lo) / range;
     if (f < 0.0f) {
         f = 0.0f;
     } else if (f > 1.0f) {
@@ -490,7 +491,9 @@ static void fmt_peak_hz(char *out, size_t cap, int32_t hz)
              (unsigned)(v % 1000u));
 }
 
-/* Cari puncak + minimum riil, lalu posisikan marker + chip (Core 0). */
+/* Cari puncak + floor robust (persentil 25), lalu posisikan marker + chip. */
+static float s_px_vals[SCOPE_W];   /* nilai per piksel untuk persentil     */
+
 static void update_peak(const float *db, int nbins)
 {
     if (s_peak_chip == NULL || s_peak_lbl == NULL || nbins <= 0) {
@@ -500,29 +503,60 @@ static void update_peak(const float *db, int nbins)
     int best_x = 0;
     int best_bin = 0;
     float best = -1000.0f;
-    float worst = 1000.0f;   /* minimum riil */
+    float worst = 1000.0f;   /* minimum riil (garis floor oranye) */
     for (int x = 0; x < SCOPE_W; x++) {
         int k0, k1;
         scope_bin_range(x, nbins, &k0, &k1);
-        for (int k = k0; k < k1; k++) {
-            if (db[k] > best) {
-                best = db[k];
-                best_x = x;
-                best_bin = k;
+        float v = db[k0];
+        for (int k = k0 + 1; k < k1; k++) {
+            if (db[k] > v) {
+                v = db[k];
             }
+        }
+        s_px_vals[x] = v;                  /* nilai per piksel (max bin)  */
+        if (v > best) {
+            best = v;
+            best_x = x;
+            best_bin = k0;
+            for (int k = k0 + 1; k < k1; k++) {
+                if (db[k] == v) {
+                    best_bin = k;
+                    break;
+                }
+            }
+        }
+        /* minimum riil dari semua bin tampil (bukan per piksel). */
+        for (int k = k0; k < k1; k++) {
             if (db[k] < worst) {
                 worst = db[k];
             }
         }
     }
     s_peak_x = best_x;
-    s_min_db = worst;        /* simpan untuk garis floor riil di draw  */
+    s_min_db = worst;
 
-    /* Dasar chart dinamis: minimum spektrum − 20 dB headroom,
-     * clamp [−200, 0]. */
-    float chart_min = worst - SCOPE_FLOOR_ABOVE;
-    if (chart_min < SCOPE_DB_MIN_FLOOR) {
-        chart_min = SCOPE_DB_MIN_FLOOR;
+    /* Floor robust: persentil 25 dari nilai per piksel (464 sampel).
+     * Quickselect sederhana: bubble ke posisi 25% dari bawah. */
+    const int n = SCOPE_W;
+    const int p25_idx = n / 4;   /* ~116 */
+    /* Salin + partial sort O(n·p) cukup murah tiap 30 ms di Core 0. */
+    for (int i = 0; i <= p25_idx; i++) {
+        int min_pos = i;
+        for (int j = i + 1; j < n; j++) {
+            if (s_px_vals[j] < s_px_vals[min_pos]) {
+                min_pos = j;
+            }
+        }
+        float tmp = s_px_vals[i];
+        s_px_vals[i] = s_px_vals[min_pos];
+        s_px_vals[min_pos] = tmp;
+    }
+    const float floor_est = s_px_vals[p25_idx];   /* p25 ≈ noise floor */
+
+    /* Dasar chart dinamis: p25 − 20 dB headroom, clamp [−160, 0]. */
+    float chart_min = floor_est - SCOPE_FLOOR_ABOVE;
+    if (chart_min < -160.0f) {
+        chart_min = -160.0f;
     } else if (chart_min > SCOPE_DB_MIN_CEIL) {
         chart_min = SCOPE_DB_MIN_CEIL;
     }

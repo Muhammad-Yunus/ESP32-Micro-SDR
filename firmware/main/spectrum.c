@@ -33,10 +33,10 @@ static const char *TAG = "spectrum";
 
 #define SP_N        CONFIG_SDR_FFT_N          /* 1024 titik               */
 #define SP_POOL     3                         /* slot snapshot (§4)       */
-/* Floor log: (re²+im²) dijaga agar ≥ 1e-12; output dBFS di-clamp ke
- * −148 (di bawah noise floor riil) agar nilai minimum bukan artifact. */
-#define SP_EPS      1e-12f
-#define SP_DBFLOOR  (-148.0f)
+/* Floor log: bin sunyi (re²+im²=0) membaca ≈ 10·log10(SP_EPS) − SP_FS_REFS
+ * ≈ −150 dBFS, jauh di bawah noise floor riil (~−110 dBFS). Nilai lebih
+ * dalam adalah artifact log, bukan sinyal. */
+#define SP_EPS      2.6e-10f
 
 /* Referensi full-scale: tone I/Q = ±1.0 (ADC penuh pasca-NCO). */
 #define SP_FS_REFS   (20.0f * log10f((2.0f * (float)SP_N) / 4.0f))
@@ -133,16 +133,12 @@ bool spectrum_get_db(float *out_db, int *out_nbins)
     dsps_bit_rev_fc32(s_fft, SP_N);
 
     /* dBFS per bin dalam urutan display: j=0 → bin −N/2, j=N/2 → DC.
-     * 0 dBFS = tone full-scale I/Q ±1.0; clamp bawah = SP_DBFLOOR. */
+     * 0 dBFS = tone full-scale I/Q ±1.0. */
     for (int j = 0; j < SP_N; j++) {
         const int k = (j < SP_N / 2) ? (j + SP_N / 2) : (j - SP_N / 2);
         const float re = s_fft[2 * k];
         const float im = s_fft[2 * k + 1];
-        float v = 10.0f * log10f(re * re + im * im + SP_EPS) - SP_FS_REFS;
-        if (v < SP_DBFLOOR) {
-            v = SP_DBFLOOR;
-        }
-        out_db[j] = v;
+        out_db[j] = 10.0f * log10f(re * re + im * im + SP_EPS) - SP_FS_REFS;
     }
 
     *out_nbins = SP_N;
