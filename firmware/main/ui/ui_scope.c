@@ -458,16 +458,17 @@ static void wf_drag_cb(lv_event_t *e)
 /* Puncak spektrum: marker vertikal + chip frekuensi (F6)              */
 /* ------------------------------------------------------------------ */
 
-static void fmt_peak_hz(char *out, size_t cap, int32_t hz)
+/* Teks chip merah: "xxx.xxxxx MHz @ -xxx dBFS" (freq dalam MHz + level). */
+static void fmt_peak(char *out, size_t cap, int32_t hz, float level_db)
 {
     if (hz < 0) {
         hz = 0;
     }
     const uint32_t v = (uint32_t)hz;
-    snprintf(out, cap, "%u.%03u.%03u Hz",
-             (unsigned)(v / 1000000u),
-             (unsigned)((v / 1000u) % 1000u),
-             (unsigned)(v % 1000u));
+    const int mb = (int)(v / 1000000u);
+    const int frac = (int)((v % 1000000u) * 100000u / 1000000u); /* 5 desimal */
+    snprintf(out, cap, "%d.%05d MHz @ %d dBFS",
+             mb, frac, (int)lroundf(level_db));
 }
 
 /* Cari puncak + floor robust (persentil 25), lalu posisikan marker + chip. */
@@ -539,8 +540,9 @@ static void update_peak(const float *db, int nbins)
     const float bin_hz = (float)CONFIG_SDR_AUDIO_FS_HZ / (float)nbins;
     const int32_t off_hz =
         (int32_t)((float)(best_bin - nbins / 2) * bin_hz);
-    char txt[24];
-    fmt_peak_hz(txt, sizeof(txt), cfg.lo_label_hz + cfg.nco_offset_hz + off_hz);
+    char txt[32];
+    fmt_peak(txt, sizeof(txt), cfg.lo_label_hz + cfg.nco_offset_hz + off_hz,
+             best);
     lv_label_set_text(s_peak_lbl, txt);
 
     /* Chip di samping marker: kanan bila puncak di kiri, dan sebaliknya. */
@@ -641,7 +643,7 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
     s_peak_lbl = lv_label_create(s_peak_chip);
     lv_obj_set_style_text_color(s_peak_lbl, ui_col_peak_fg(), 0);
     lv_obj_set_style_text_font(s_peak_lbl, &lv_font_montserrat_14, 0);
-    lv_label_set_text(s_peak_lbl, "20.000.000 Hz");
+    lv_label_set_text(s_peak_lbl, "20.000 MHz @ 0 dBFS");
     /* Chip child s_bar_obj: x relatif obj → +YLABEL_W (offset strip kiri). */
     lv_obj_set_pos(s_peak_chip, YLABEL_W + 2, 4);
 
