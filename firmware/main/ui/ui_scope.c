@@ -37,9 +37,13 @@
 #define BAR_Y              SCOPE_Y
 #define WF_Y               (BAR_Y + BAR_H + BAR_GAP)
 
-/* Peta dBFS → tinggi/warna: atas +10 (penuh), dasar −100 (hardcoded). */
+/* Peta dBFS → tinggi/warna: atas +10 (penuh); dasar DYNAMIS =
+ * minimum spektrum − 20 dB (clamp [−200, 0]) sehingga nilai minimum
+ * spektrum selalu melayang ~20 dB di atas dasar chart. */
 #define SCOPE_DB_MAX       (10.0f)
-#define SCOPE_DB_MIN       (-100.0f)
+#define SCOPE_FLOOR_ABOVE  (20.0f)   /* headroom min spektrum di atas dasar */
+#define SCOPE_DB_MIN_FLOOR (-200.0f) /* clamp dasar chart terdalam        */
+#define SCOPE_DB_MIN_CEIL   (0.0f)   /* clamp dasar chart teratas         */
 
 static lv_obj_t *s_bar_obj;
 static lv_obj_t *s_canvas;
@@ -52,7 +56,7 @@ static int s_wf_rows;
 /* Hasil spektrum terakhir (untuk redraw LVGL saat invalidasi). */
 static float s_db[CONFIG_SDR_FFT_N];
 static int s_nbins;
-static float s_db_min = SCOPE_DB_MIN; /* dasar chart dinamis (state)   */
+static float s_db_min = SCOPE_DB_MIN_FLOOR; /* dasar chart dinamis (state) */
 
 /* Line chart (F6): titik per piksel + marker puncak merah + chip freq. */
 static lv_point_precise_t s_chart_pts[SCOPE_W];
@@ -62,8 +66,8 @@ static lv_obj_t *s_peak_chip;
 static lv_obj_t *s_peak_lbl;
 static int s_peak_x = -1;                       /* piksel puncak (bar)     */
 
-/* Minimum riil spektrum (dBFS, bisa di bawah SCOPE_DB_MIN). */
-static float s_min_db = SCOPE_DB_MIN;
+/* Minimum riil spektrum (dBFS, bisa di bawah SCOPE_DB_MIN_FLOOR). */
+static float s_min_db = SCOPE_DB_MIN_FLOOR;
 
 /* Drag waterfall → offset. */
 static bool s_dragging;
@@ -74,10 +78,17 @@ static int32_t s_drag_x0;
 /* Utilitas                                                            */
 /* ------------------------------------------------------------------ */
 
-/* dB → frac [0,1] untuk tinggi chart / indeks warna waterfall. */
+/* dB → frac [0,1] untuk tinggi chart / indeks warna waterfall.
+ * Dasar chart = s_db_min (dinamis, dihitung di update_peak);
+ * atas tetap SCOPE_DB_MAX. */
 static float db_frac(float db)
 {
-    float f = (db - SCOPE_DB_MIN) / (SCOPE_DB_MAX - SCOPE_DB_MIN);
+    const float lo = s_db_min;
+    const float hi = SCOPE_DB_MAX;
+    if (hi - lo < 1.0f) {
+        return (db > hi) ? 1.0f : 0.0f;
+    }
+    float f = (db - lo) / (hi - lo);
     if (f < 0.0f) {
         f = 0.0f;
     } else if (f > 1.0f) {
@@ -139,11 +150,40 @@ static int32_t freq_to_x(int32_t hz)
     return (int32_t)lroundf(x);
 }
 
-/* Grid: horizontal tiap 20 dB, vertikal tiap 500 Hz + DC. */
+/* Grid: horizontal di nilai dBFS "bersih" di dalam rentang dinamis
+ * [s_db_min, SCOPE_DB_MAX], vertikal tiap 500 Hz + DC. */
 static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
 {
     const int32_t h = coords->y2 - coords->y1 + 1;
-    static const int db_marks[] = {-100, -80, -60, -40, -20, 0};
+    /* 6 garis horizontal dari s_db_min s.d. SCOPE_DB_MAX, dibulatkan
+     * ke kelipatan 10 dB (nilai bersih). */
+    const float lo = s_db_min;
+    const float hi = SCOPE_DB_MAX;
+    /* Range dinamis: cari step grid yang bagus (10/20/50 dB). */
+    const float range = hi - lo;
+    float step = 10.0f;
+    if (range > 300.0f) {
+        step = 50.0f;
+    } else if (range > 150.0f) {
+        step = 20.0f;
+    }
+    int db_marks[8];
+    int n_marks = 0;
+    /* Mulai dari kelipatan step pertama di atas lo, s.d. hi. */
+    float first = (float)((int)(lo / step)) * step;
+    if (first < lo) {
+        first += step;
+    }
+    for (float v = first; v <= hi + 0.5f && n_marks < 8; v += step) {
+        db_marks[n_marks++] = (int)lroundf(v);
+    }
+    /* Kalau tidak ada (range < step), gambar 3 garis: lo, tengah, hi. */
+    if (n_marks == 0) {
+        db_marks[0] = (int)lroundf(lo);
+        db_marks[1] = (int)lroundf((lo + hi) * 0.5f);
+        db_marks[2] = (int)lroundf(hi);
+        n_marks = 3;
+    }
     static const int32_t hz_marks[] = {-2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000};
     lv_point_precise_t pts[2];
 
@@ -155,7 +195,7 @@ static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
     ld.points = pts;
     ld.point_cnt = 2;
 
-    for (size_t i = 0; i < sizeof(db_marks) / sizeof(db_marks[0]); i++) {
+    for (int i = 0; i < n_marks; i++) {
         const int32_t y = coords->y2 -
             (int32_t)(db_frac((float)db_marks[i]) * (float)(h - 1));
         pts[0].x = coords->x1;
@@ -182,20 +222,44 @@ static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
     }
 }
 
-/* Label skala dBFS (kanan) + frekuensi absolut (bawah). */
+/* Label skala dBFS adaptif (kanan, nilai dinamis) + frekuensi absolut (bawah). */
 static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
 {
     const int32_t h = coords->y2 - coords->y1 + 1;
-    static const int db_marks[] = {-100, -80, -60, -40, -20, 0};
-    static const int32_t hz_marks[] = {-2000, -1000, 0, 1000, 2000};
+    const int32_t hz_marks[] = {-2000, -1000, 0, 1000, 2000};
+    /* Grid dBFS dinamis — sama persis dengan logika di draw_grid(). */
+    const float lo = s_db_min;
+    const float hi = SCOPE_DB_MAX;
+    const float range = hi - lo;
+    float step = 10.0f;
+    if (range > 300.0f) {
+        step = 50.0f;
+    } else if (range > 150.0f) {
+        step = 20.0f;
+    }
+    int db_marks[8];
+    int n_marks = 0;
+    float first = (float)((int)(lo / step)) * step;
+    if (first < lo) {
+        first += step;
+    }
+    for (float v = first; v <= hi + 0.5f && n_marks < 8; v += step) {
+        db_marks[n_marks++] = (int)lroundf(v);
+    }
+    if (n_marks == 0) {
+        db_marks[0] = (int)lroundf(lo);
+        db_marks[1] = (int)lroundf((lo + hi) * 0.5f);
+        db_marks[2] = (int)lroundf(hi);
+        n_marks = 3;
+    }
     /* Buffer statis: pointer teks dipakai draw task hingga render. */
-    static char x_text[sizeof(hz_marks) / sizeof(hz_marks[0])][16];
-    static char y_text[sizeof(db_marks) / sizeof(db_marks[0])][8];
+    static char x_text[5][16];
+    static char y_text[8][8];
 
     /* X axis = LO + nco_offset + offset grid, MHz 3 desimal (1 kHz/tick). */
     sdr_config_t cfg;
     sdr_config_get(&cfg);
-    for (size_t i = 0; i < sizeof(hz_marks) / sizeof(hz_marks[0]); i++) {
+    for (size_t i = 0; i < 5; i++) {
         int32_t hz = cfg.lo_label_hz + cfg.nco_offset_hz + hz_marks[i];
         if (hz < 0) {
             hz = 0;
@@ -204,8 +268,8 @@ static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
                  (unsigned)(hz / 1000000), (unsigned)((hz / 1000) % 1000));
     }
 
-    /* Y axis label = dBFS mentah (0 dBFS = tone full-scale I/Q ±1.0). */
-    for (size_t i = 0; i < sizeof(db_marks) / sizeof(db_marks[0]); i++) {
+    /* Y axis label = dBFS aktual (dasar dinamis, 0 dBFS = full-scale I/Q). */
+    for (int i = 0; i < n_marks; i++) {
         snprintf(y_text[i], sizeof(y_text[i]), "%d", db_marks[i]);
     }
 
@@ -232,7 +296,7 @@ static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
     td.text = "dBFS";
     lv_draw_label(layer, &td, &unit);
 
-    for (size_t i = 0; i < sizeof(db_marks) / sizeof(db_marks[0]); i++) {
+    for (int i = 0; i < n_marks; i++) {
         const int32_t y = coords->y2 -
             (int32_t)(db_frac((float)db_marks[i]) * (float)(h - 1));
         lv_area_t a = {
@@ -247,7 +311,7 @@ static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
     }
 
     td.align = LV_TEXT_ALIGN_CENTER;
-    for (size_t i = 0; i < sizeof(hz_marks) / sizeof(hz_marks[0]); i++) {
+    for (size_t i = 0; i < 5; i++) {
         const int32_t x = freq_to_x(hz_marks[i]);
         /* "20.000 M" 8 karakter @Montserrat 10 ≈ 48 px; lebar ±25 px. */
         lv_area_t a = {
@@ -316,8 +380,9 @@ static void bar_draw_cb(lv_event_t *e)
 
     draw_scale_labels(layer, &coords);
 
-    /* Garis floor riil: merah putus, di posisi s_min_db (bisa di bawah
-     * SCOPE_DB_MIN; di-klamp ke dasar chart). */
+    /* Garis floor riil: oranye, di posisi s_min_db.
+     * Dengan dasar dinamis (s_db_min = s_min_db − 20), garis ini
+     * selalu 20 dB di atas dasar chart → terlihat melayang. */
     const float f_min = db_frac(s_min_db);
     const int32_t y_floor = coords.y2 - (int32_t)(f_min * (float)(h - 1));
     lv_draw_line_dsc_t fdsc;
@@ -453,6 +518,16 @@ static void update_peak(const float *db, int nbins)
     s_peak_x = best_x;
     s_min_db = worst;        /* simpan untuk garis floor riil di draw  */
 
+    /* Dasar chart dinamis: minimum spektrum − 20 dB headroom,
+     * clamp [−200, 0]. */
+    float chart_min = worst - SCOPE_FLOOR_ABOVE;
+    if (chart_min < SCOPE_DB_MIN_FLOOR) {
+        chart_min = SCOPE_DB_MIN_FLOOR;
+    } else if (chart_min > SCOPE_DB_MIN_CEIL) {
+        chart_min = SCOPE_DB_MIN_CEIL;
+    }
+    s_db_min = chart_min;
+
     /* Frekuensi absolut = LO label + offset NCO + offset bin (DC = tuned). */
     sdr_config_t cfg;
     sdr_config_get(&cfg);
@@ -496,7 +571,6 @@ static void scope_timer_cb(lv_timer_t *timer)
 
 void ui_scope_push(const float *db, int nbins)
 {
-    s_db_min = SCOPE_DB_MIN;
     update_peak(db, nbins);
     wf_push_row(db, nbins);
     if (s_bar_obj != NULL) {
