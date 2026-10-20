@@ -139,12 +139,12 @@ static int32_t freq_to_x(int32_t hz)
     return (int32_t)lroundf(x);
 }
 
-/* Grid: horizontal tiap 20 dB, vertikal tiap 1 kHz + DC. */
+/* Grid: horizontal tiap 20 dB, vertikal tiap 500 Hz + DC. */
 static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
 {
     const int32_t h = coords->y2 - coords->y1 + 1;
     static const int db_marks[] = {-100, -80, -60, -40, -20, 0};
-    static const int32_t hz_marks[] = {-2000, -1000, 0, 1000, 2000};
+    static const int32_t hz_marks[] = {-2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000};
     lv_point_precise_t pts[2];
 
     lv_draw_line_dsc_t ld;
@@ -303,7 +303,7 @@ static void bar_draw_cb(lv_event_t *e)
         lv_draw_line_dsc_t mdsc;
         lv_draw_line_dsc_init(&mdsc);
         mdsc.color = ui_col_peak();
-        mdsc.width = 2;
+        mdsc.width = 1;
         mdsc.opa = LV_OPA_COVER;
         mdsc.points = s_marker_pts;
         mdsc.point_cnt = 2;
