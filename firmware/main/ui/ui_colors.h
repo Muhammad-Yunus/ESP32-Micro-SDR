@@ -11,20 +11,20 @@
 #include "lvgl.h"
 
 /* Screen & chrome */
-static inline lv_color_t ui_col_bg(void)       { return lv_color_hex(0x001020); }
-static inline lv_color_t ui_col_topbar(void)   { return lv_color_hex(0x001830); }
-static inline lv_color_t ui_col_botbar(void)   { return lv_color_hex(0x001428); }
-static inline lv_color_t ui_col_modal(void)    { return lv_color_hex(0x001C38); }
+static inline lv_color_t ui_col_bg(void)       { return lv_color_hex(0x003050); }
+static inline lv_color_t ui_col_topbar(void)   { return lv_color_hex(0x004070); }
+static inline lv_color_t ui_col_botbar(void)   { return lv_color_hex(0x003860); }
+static inline lv_color_t ui_col_modal(void)    { return lv_color_hex(0x005090); }
 
 /* Buttons */
-static inline lv_color_t ui_col_btn(void)      { return lv_color_hex(0x0A3A5C); }
-static inline lv_color_t ui_col_btn_press(void){ return lv_color_hex(0x0E5A8C); }
-static inline lv_color_t ui_col_btn_checked(void) { return lv_color_hex(0x1E7AB0); }
+static inline lv_color_t ui_col_btn(void)      { return lv_color_hex(0x0A5A90); }
+static inline lv_color_t ui_col_btn_press(void){ return lv_color_hex(0x1E8AC8); }
+static inline lv_color_t ui_col_btn_checked(void) { return lv_color_hex(0x3EB8FF); }
 
 /* Text */
 static inline lv_color_t ui_col_fg(void)       { return lv_color_hex(0xFFFFFF); }
-static inline lv_color_t ui_col_dim(void)      { return lv_color_hex(0x708898); }
-static inline lv_color_t ui_col_accent(void)   { return lv_color_hex(0xFF9E2C); }
+static inline lv_color_t ui_col_dim(void)      { return lv_color_hex(0x9AB0C0); }
+static inline lv_color_t ui_col_accent(void)   { return lv_color_hex(0xFFB84C); }
 
 /* Keypad right column: matches the theme default keyboard
  * (light grey panel, white keys, near-black labels). */
@@ -34,13 +34,13 @@ static inline lv_color_t ui_col_pad_press(void)  { return lv_palette_lighten(LV_
 static inline lv_color_t ui_col_pad_fg(void)     { return lv_palette_darken(LV_PALETTE_GREY, 4); }
 
 /* "7-segment" LO display window (dark glass, green digits). */
-static inline lv_color_t ui_col_lcd_bg(void)     { return lv_color_hex(0x060A06); }
-static inline lv_color_t ui_col_lcd_border(void) { return lv_color_hex(0x203020); }
-static inline lv_color_t ui_col_lcd_fg(void)     { return lv_color_hex(0x3CFF70); }
+static inline lv_color_t ui_col_lcd_bg(void)     { return lv_color_hex(0x081808); }
+static inline lv_color_t ui_col_lcd_border(void) { return lv_color_hex(0x306030); }
+static inline lv_color_t ui_col_lcd_fg(void)     { return lv_color_hex(0x50FF80); }
 
 /* Top-bar mode chip/badge. */
-static inline lv_color_t ui_col_chip(void)       { return lv_color_hex(0x1E7AB0); }
-static inline lv_color_t ui_col_chip_press(void) { return lv_color_hex(0x2E8FC6); }
+static inline lv_color_t ui_col_chip(void)       { return lv_color_hex(0x2888C0); }
+static inline lv_color_t ui_col_chip_press(void) { return lv_color_hex(0x40A0D8); }
 
 /* Waterfall colormap (F6): LUT 32 entri RGB565 mentah (uint16_t) —
  * black → biru → cyan → kuning → merah; didefinisikan di ui_colors.c.
@@ -54,11 +54,11 @@ static inline uint16_t ui_wf_color(int idx)
 }
 
 /* Spectrum line chart + peak marker (F6). */
-static inline lv_color_t ui_col_scope_line(void) { return lv_color_hex(0x66D9FF); }
-static inline lv_color_t ui_col_peak(void)       { return lv_color_hex(0xFF2A2A); }
+static inline lv_color_t ui_col_scope_line(void) { return lv_color_hex(0x88EEFF); }
+static inline lv_color_t ui_col_peak(void)       { return lv_color_hex(0xFF4040); }
 static inline lv_color_t ui_col_peak_fg(void)    { return lv_color_hex(0x000000); }
-static inline lv_color_t ui_col_grid(void)       { return lv_color_hex(0x33414D); }
-static inline lv_color_t ui_col_grid_dc(void)    { return lv_color_hex(0x4C6473); }
-static inline lv_color_t ui_col_grid_text(void)  { return lv_color_hex(0x9FB2C0); }
+static inline lv_color_t ui_col_grid(void)       { return lv_color_hex(0x4A5A6A); }
+static inline lv_color_t ui_col_grid_dc(void)    { return lv_color_hex(0x6A7A8A); }
+static inline lv_color_t ui_col_grid_text(void)  { return lv_color_hex(0xC0D0E0); }
 /* Garis floor riil (minimum spektrum, bisa di bawah skala). */
-static inline lv_color_t ui_col_floor(void)      { return lv_color_hex(0xFF8C00); }
+static inline lv_color_t ui_col_floor(void)      { return lv_color_hex(0xFFAA20); }
