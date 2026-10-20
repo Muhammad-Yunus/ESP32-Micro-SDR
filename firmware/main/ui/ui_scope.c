@@ -27,11 +27,12 @@
 #include "ui/ui_main.h"
 
 /* Geometri area scope (480x320 landscape, top 52 / bottom 56).
- * Strip sumbu: kiri 30 px (label dBFS) + bawah 18 px (label Hz), di luar
- * area plot. Plot = 422×128. */
-#define SCOPE_X            38
+ * Objek chart mentok kiri-x2=0 dan x479. Strip sumbu: kiri 30 px
+ * (label dBFS) + bawah 18 px (label Hz), di dalam objek. Plot = 450×128
+ * (x30..479). Waterfall di bawah plot, x30..479. */
+#define SCOPE_X            30
 #define SCOPE_Y            (52 + 4)
-#define SCOPE_W            442
+#define SCOPE_W            450
 #define YLABEL_W          30
 #define XLABEL_H          18
 #define WF_H               44
