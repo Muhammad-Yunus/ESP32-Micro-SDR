@@ -315,14 +315,14 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
     td.text = "dBFS";
     lv_draw_label(layer, &td, &unit);
 
-    /* Label dBFS di strip kiri, align kanan, menempel tepi kiri plot. */
+    /* Label dBFS di strip kiri, align kanan, 3 px padding dari tepi plot. */
     for (int i = 0; i < n_marks; i++) {
         const int32_t y = pr->y2 -
             (int32_t)(db_frac((float)db_marks[i]) * (float)(pr->h - 1));
         lv_area_t a = {
             .x1 = obj->x1,
             .y1 = y - 6,
-            .x2 = obj->x1 + YLABEL_W - 1,
+            .x2 = obj->x1 + YLABEL_W - 4,
             .y2 = y + 6,
         };
         lv_draw_rect(layer, &bg, &a);
