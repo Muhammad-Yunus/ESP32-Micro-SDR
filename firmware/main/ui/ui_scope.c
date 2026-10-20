@@ -294,7 +294,7 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
     lv_draw_rect_dsc_t bg;
     lv_draw_rect_dsc_init(&bg);
     bg.bg_color = lv_color_hex(0x000000);
-    bg.bg_opa = LV_OPA_60;
+    bg.bg_opa = LV_OPA_0;
     bg.radius = 0;
 
     lv_draw_label_dsc_t td;
