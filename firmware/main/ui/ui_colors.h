@@ -60,5 +60,3 @@ static inline lv_color_t ui_col_peak_fg(void)    { return lv_color_hex(0x000000)
 static inline lv_color_t ui_col_grid(void)       { return lv_color_hex(0x4A5A6A); }
 static inline lv_color_t ui_col_grid_dc(void)    { return lv_color_hex(0x6A7A8A); }
 static inline lv_color_t ui_col_grid_text(void)  { return lv_color_hex(0xC0D0E0); }
-/* Garis floor riil (minimum spektrum, bisa di bawah skala). */
-static inline lv_color_t ui_col_floor(void)      { return lv_color_hex(0xFFAA20); }

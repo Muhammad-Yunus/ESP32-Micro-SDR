@@ -61,13 +61,9 @@ static float s_db_min = SCOPE_DB_MIN_FLOOR; /* dasar chart dinamis (state) */
 /* Line chart (F6): titik per piksel + marker puncak merah + chip freq. */
 static lv_point_precise_t s_chart_pts[SCOPE_W];
 static lv_point_precise_t s_marker_pts[2];
-static lv_point_precise_t s_floor_pts[2];      /* garis floor riil        */
 static lv_obj_t *s_peak_chip;
 static lv_obj_t *s_peak_lbl;
 static int s_peak_x = -1;                       /* piksel puncak (bar)     */
-
-/* Minimum riil spektrum (dBFS, bisa di bawah SCOPE_DB_MIN_FLOOR). */
-static float s_min_db = SCOPE_DB_MIN_FLOOR;
 
 /* Drag waterfall → offset. */
 static bool s_dragging;
@@ -380,47 +376,6 @@ static void bar_draw_cb(lv_event_t *e)
     }
 
     draw_scale_labels(layer, &coords);
-
-    /* Garis floor riil: oranye, di posisi s_min_db.
-     * Dengan dasar dinamis (s_db_min = s_min_db − 20), garis ini
-     * selalu 20 dB di atas dasar chart → terlihat melayang. */
-    const float f_min = db_frac(s_min_db);
-    const int32_t y_floor = coords.y2 - (int32_t)(f_min * (float)(h - 1));
-    lv_draw_line_dsc_t fdsc;
-    lv_draw_line_dsc_init(&fdsc);
-    fdsc.color = ui_col_floor();
-    fdsc.width = 1;
-    fdsc.opa = LV_OPA_80;
-    fdsc.points = s_floor_pts;
-    fdsc.point_cnt = 2;
-    s_floor_pts[0].x = (lv_value_precise_t)coords.x1;
-    s_floor_pts[0].y = (lv_value_precise_t)y_floor;
-    s_floor_pts[1].x = (lv_value_precise_t)coords.x2;
-    s_floor_pts[1].y = (lv_value_precise_t)y_floor;
-    lv_draw_line(layer, &fdsc);
-
-    /* Label floor riil di sisi kiri chart, tepat di atas garis. */
-    char flbl[12];
-    snprintf(flbl, sizeof(flbl), "%d", (int)lroundf(s_min_db));
-    lv_draw_label_dsc_t ftd;
-    lv_draw_label_dsc_init(&ftd);
-    ftd.color = ui_col_floor();
-    ftd.font = &lv_font_montserrat_10;
-    ftd.align = LV_TEXT_ALIGN_LEFT;
-    ftd.text = flbl;
-    lv_draw_rect_dsc_t fbg;
-    lv_draw_rect_dsc_init(&fbg);
-    fbg.bg_color = lv_color_hex(0x000000);
-    fbg.bg_opa = LV_OPA_70;
-    fbg.radius = 0;
-    lv_area_t fa = {
-        .x1 = coords.x1 + 2,
-        .y1 = y_floor - 12,
-        .x2 = coords.x1 + 30,
-        .y2 = y_floor - 1,
-    };
-    lv_draw_rect(layer, &fbg, &fa);
-    lv_draw_label(layer, &ftd, &fa);
 }
 
 /* ------------------------------------------------------------------ */
@@ -503,7 +458,6 @@ static void update_peak(const float *db, int nbins)
     int best_x = 0;
     int best_bin = 0;
     float best = -1000.0f;
-    float worst = 1000.0f;   /* minimum riil (garis floor oranye) */
     for (int x = 0; x < SCOPE_W; x++) {
         int k0, k1;
         scope_bin_range(x, nbins, &k0, &k1);
@@ -525,15 +479,8 @@ static void update_peak(const float *db, int nbins)
                 }
             }
         }
-        /* minimum riil dari semua bin tampil (bukan per piksel). */
-        for (int k = k0; k < k1; k++) {
-            if (db[k] < worst) {
-                worst = db[k];
-            }
-        }
     }
     s_peak_x = best_x;
-    s_min_db = worst;
 
     /* Floor robust: persentil 25 dari nilai per piksel (464 sampel).
      * Quickselect sederhana: bubble ke posisi 25% dari bawah. */
