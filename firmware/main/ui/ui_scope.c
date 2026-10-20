@@ -31,7 +31,7 @@
  * area plot. Plot = 422×128. */
 #define SCOPE_X            38
 #define SCOPE_Y            (52 + 4)
-#define SCOPE_W            422
+#define SCOPE_W            442
 #define YLABEL_W          30
 #define XLABEL_H          18
 #define WF_H               44
