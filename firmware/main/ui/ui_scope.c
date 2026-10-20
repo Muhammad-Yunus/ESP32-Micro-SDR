@@ -329,24 +329,38 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
         lv_draw_label(layer, &td, &a);
     }
 
-    /* Label Hz di strip bawah, center per tick. */
-    td.align = LV_TEXT_ALIGN_CENTER;
+    /* Label Hz di strip bawah.
+     * - label pertama (hz=-500): align kiri  di tepi kiri plot  (x1, lebar 52 px)
+     * - label terakhir (hz=+500): align kanan di tepi kanan plot (lebar 52 px)
+     * - label tengah: align center di tengah tick */
+    const int32_t lbl_w = 52;   /* cukup untuk 8 karakter @Montserrat 10 (~48 px) */
     for (size_t i = 0; i < 5; i++) {
-        const int32_t x = pr->x1 + freq_to_x(hz_marks[i]);
-        /* "20.000 M" 8 karakter @Montserrat 10 ≈ 46 px; box ±32 px (64 px)
-         * cukup untuk semua label tanpa wrap, termasuk yang di-clamp. */
-        lv_area_t a = {
-            .x1 = x - 32,
-            .y1 = pr->y2 + 1,
-            .x2 = x + 32,
-            .y2 = pr->y2 + XLABEL_H,
-        };
-        if (a.x1 < pr->x1) {
+        int32_t x = pr->x1 + freq_to_x(hz_marks[i]);
+        lv_area_t a;
+        if (i == 0) {
+            /* label pertama: memaksa ke tepi kiri, align kiri */
+            td.align = LV_TEXT_ALIGN_LEFT;
             a.x1 = pr->x1;
-        }
-        if (a.x2 > pr->x2) {
+            a.x2 = pr->x1 + lbl_w - 1;
+        } else if (i == 4) {
+            /* label terakhir: memaksa ke tepi kanan, align kanan */
+            td.align = LV_TEXT_ALIGN_RIGHT;
+            a.x1 = pr->x2 - lbl_w + 1;
             a.x2 = pr->x2;
+        } else {
+            /* label tengah: center di tick */
+            td.align = LV_TEXT_ALIGN_CENTER;
+            a.x1 = x - lbl_w / 2;
+            a.x2 = x + lbl_w / 2;
+            if (a.x1 < pr->x1) {
+                a.x1 = pr->x1;
+            }
+            if (a.x2 > pr->x2) {
+                a.x2 = pr->x2;
+            }
         }
+        a.y1 = pr->y2 + 1;
+        a.y2 = pr->y2 + XLABEL_H;
         lv_draw_rect(layer, &bg, &a);
         td.text = x_text[i];
         lv_draw_label(layer, &td, &a);
