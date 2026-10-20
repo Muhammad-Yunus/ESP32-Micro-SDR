@@ -151,11 +151,27 @@ static int32_t freq_to_x(int32_t hz)
     return (int32_t)lroundf(x);
 }
 
+/* Persegi plot di dalam s_bar_obj: objek mencakup plot + strip label
+ * (kiri YLABEL_W, bawah XLABEL_H) karena LVGL memotong semua gambar
+ * DRAW_MAIN ke clip area objek (koordinat relatif objek = 0,0). */
+typedef struct {
+    int32_t x1, y1, x2, y2;   /* absolut (ruang layar) */
+    int32_t h;                /* tinggi plot px */
+} plot_rect_t;
+
+static void get_plot_rect(const lv_area_t *obj, plot_rect_t *out)
+{
+    out->x1 = obj->x1 + YLABEL_W;
+    out->y1 = obj->y1;
+    out->x2 = obj->x2;
+    out->y2 = obj->y1 + BAR_H - 1;
+    out->h  = BAR_H;
+}
+
 /* Grid: horizontal di nilai dBFS "bersih" di dalam rentang dinamis
  * [s_db_min, SCOPE_DB_MAX], vertikal tiap 500 Hz + DC. */
-static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
+static void draw_grid(lv_layer_t *layer, const plot_rect_t *pr)
 {
-    const int32_t h = coords->y2 - coords->y1 + 1;
     /* 6 garis horizontal dari s_db_min s.d. SCOPE_DB_MAX, dibulatkan
      * ke kelipatan 10 dB (nilai bersih). */
     const float lo = s_db_min;
@@ -197,11 +213,11 @@ static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
     ld.point_cnt = 2;
 
     for (int i = 0; i < n_marks; i++) {
-        const int32_t y = coords->y2 -
-            (int32_t)(db_frac((float)db_marks[i]) * (float)(h - 1));
-        pts[0].x = coords->x1;
+        const int32_t y = pr->y2 -
+            (int32_t)(db_frac((float)db_marks[i]) * (float)(pr->h - 1));
+        pts[0].x = pr->x1;
         pts[0].y = y;
-        pts[1].x = coords->x2;
+        pts[1].x = pr->x2;
         pts[1].y = y;
         lv_draw_line(layer, &ld);
     }
@@ -214,19 +230,20 @@ static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
         vd.opa = LV_OPA_COVER;
         vd.points = pts;
         vd.point_cnt = 2;
-        const int32_t x = freq_to_x(hz_marks[i]);
+        const int32_t x = pr->x1 + freq_to_x(hz_marks[i]);
         pts[0].x = x;
-        pts[0].y = coords->y1;
+        pts[0].y = pr->y1;
         pts[1].x = x;
-        pts[1].y = coords->y2;
+        pts[1].y = pr->y2;
         lv_draw_line(layer, &vd);
     }
 }
 
-/* Label skala dBFS adaptif (kanan, nilai dinamis) + frekuensi absolut (bawah). */
-static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
+/* Label dBFS di strip kiri + label Hz di strip bawah, keduanya di luar
+ * tepi grid plot (inset 30px kiri / 18px bawah pada s_bar_obj). */
+static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
+                              const lv_area_t *obj)
 {
-    const int32_t h = coords->y2 - coords->y1 + 1;
     const int32_t hz_marks[] = {-500, -250, 0, 250, 500};
     /* Grid dBFS dinamis — sama persis dengan logika di draw_grid(). */
     const float lo = s_db_min;
@@ -288,50 +305,46 @@ static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
 
     /* Satuan sumbu Y di strip kiri, sejajar tepi atas plot. */
     lv_area_t unit = {
-        .x1 = coords->x1 - YLABEL_W,
-        .y1 = coords->y1,
-        .x2 = coords->x1 - 1,
-        .y2 = coords->y1 + 11,
+        .x1 = obj->x1,
+        .y1 = obj->y1,
+        .x2 = obj->x1 + YLABEL_W - 1,
+        .y2 = obj->y1 + 11,
     };
     lv_draw_rect(layer, &bg, &unit);
     td.text = "dBFS";
     lv_draw_label(layer, &td, &unit);
 
-    /* Label dBFS di strip kiri, di luar tepi grid chart (align kanan,
-     * menempel tepi kiri plot). */
+    /* Label dBFS di strip kiri, align kanan, menempel tepi kiri plot. */
     for (int i = 0; i < n_marks; i++) {
-        const int32_t y = coords->y2 -
-            (int32_t)(db_frac((float)db_marks[i]) * (float)(h - 1));
+        const int32_t y = pr->y2 -
+            (int32_t)(db_frac((float)db_marks[i]) * (float)(pr->h - 1));
         lv_area_t a = {
-            .x1 = coords->x1 - YLABEL_W,
+            .x1 = obj->x1,
             .y1 = y - 6,
-            .x2 = coords->x1 - 1,
+            .x2 = obj->x1 + YLABEL_W - 1,
             .y2 = y + 6,
         };
-        if (a.x1 < 0) {
-            a.x1 = 0;
-        }
         lv_draw_rect(layer, &bg, &a);
         td.text = y_text[i];
         lv_draw_label(layer, &td, &a);
     }
 
-    /* Label Hz di strip bawah, di luar tepi grid chart (center per tick). */
+    /* Label Hz di strip bawah, center per tick. */
     td.align = LV_TEXT_ALIGN_CENTER;
     for (size_t i = 0; i < 5; i++) {
-        const int32_t x = freq_to_x(hz_marks[i]);
+        const int32_t x = pr->x1 + freq_to_x(hz_marks[i]);
         /* "20.000 M" 8 karakter @Montserrat 10 ≈ 48 px; lebar ±24 px. */
         lv_area_t a = {
             .x1 = x - 24,
-            .y1 = coords->y2 + 1,
+            .y1 = pr->y2 + 1,
             .x2 = x + 24,
-            .y2 = coords->y2 + 1 + XLABEL_H - 1,
+            .y2 = pr->y2 + XLABEL_H,
         };
-        if (a.x1 < 0) {
-            a.x1 = 0;
+        if (a.x1 < pr->x1) {
+            a.x1 = pr->x1;
         }
-        if (a.x2 > 480) {
-            a.x2 = 480;
+        if (a.x2 > pr->x2) {
+            a.x2 = pr->x2;
         }
         lv_draw_rect(layer, &bg, &a);
         td.text = x_text[i];
@@ -348,11 +361,12 @@ static void bar_draw_cb(lv_event_t *e)
     lv_obj_t *obj = lv_event_get_target(e);
     lv_area_t coords;
     lv_obj_get_coords(obj, &coords);
-    const int32_t h = coords.y2 - coords.y1 + 1;
+    plot_rect_t pr;
+    get_plot_rect(&coords, &pr);
 
-    draw_grid(layer, &coords);
+    draw_grid(layer, &pr);
 
-    /* Line chart biru muda, satu draw task (polyline 464 titik). */
+    /* Line chart biru muda, satu draw task (polyline 422 titik). */
     lv_draw_line_dsc_t dsc;
     lv_draw_line_dsc_init(&dsc);
     dsc.color = ui_col_scope_line();
@@ -363,13 +377,13 @@ static void bar_draw_cb(lv_event_t *e)
 
     for (int x = 0; x < SCOPE_W; x++) {
         const float f = db_frac(scope_val(s_db, x, s_nbins));
-        s_chart_pts[x].x = (lv_value_precise_t)(coords.x1 + x);
+        s_chart_pts[x].x = (lv_value_precise_t)(pr.x1 + x);
         s_chart_pts[x].y =
-            (lv_value_precise_t)(coords.y2 - (int32_t)(f * (float)(h - 1)));
+            (lv_value_precise_t)(pr.y2 - (int32_t)(f * (float)(pr.h - 1)));
     }
     lv_draw_line(layer, &dsc);
 
-    /* Marker vertikal merah di puncak. */
+    /* Marker vertikal merah di puncak (dalam plot). */
     if (s_peak_x >= 0 && s_peak_x < SCOPE_W) {
         lv_draw_line_dsc_t mdsc;
         lv_draw_line_dsc_init(&mdsc);
@@ -378,14 +392,14 @@ static void bar_draw_cb(lv_event_t *e)
         mdsc.opa = LV_OPA_COVER;
         mdsc.points = s_marker_pts;
         mdsc.point_cnt = 2;
-        s_marker_pts[0].x = (lv_value_precise_t)(coords.x1 + s_peak_x);
+        s_marker_pts[0].x = (lv_value_precise_t)(pr.x1 + s_peak_x);
         s_marker_pts[1].x = s_marker_pts[0].x;
-        s_marker_pts[0].y = (lv_value_precise_t)(coords.y1 + 2);
-        s_marker_pts[1].y = (lv_value_precise_t)coords.y2;
+        s_marker_pts[0].y = (lv_value_precise_t)(pr.y1 + 2);
+        s_marker_pts[1].y = (lv_value_precise_t)pr.y2;
         lv_draw_line(layer, &mdsc);
     }
 
-    draw_scale_labels(layer, &coords);
+    draw_scale_labels(layer, &pr, &coords);
 }
 
 /* ------------------------------------------------------------------ */
@@ -532,11 +546,12 @@ static void update_peak(const float *db, int nbins)
     /* Chip di samping marker: kanan bila puncak di kiri, dan sebaliknya. */
     lv_obj_update_layout(s_peak_chip);
     const int32_t cw = lv_obj_get_width(s_peak_chip);
-    int32_t cx = (best_x < SCOPE_W / 2) ? (best_x + 8) : (best_x - cw - 8);
-    if (cx < 2) {
-        cx = 2;
-    } else if (cx + cw > SCOPE_W - 2) {
-        cx = SCOPE_W - cw - 2;
+    int32_t cx = (best_x < SCOPE_W / 2) ? (YLABEL_W + best_x + 8)
+                                        : (YLABEL_W + best_x - cw - 8);
+    if (cx < YLABEL_W + 2) {
+        cx = YLABEL_W + 2;
+    } else if (cx + cw > SCOPE_W + YLABEL_W - 2) {
+        cx = SCOPE_W + YLABEL_W - cw - 2;
     }
     lv_obj_set_pos(s_peak_chip, cx, 4);
 }
@@ -598,10 +613,12 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
     lv_obj_add_event_cb(s_canvas, wf_drag_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(s_canvas, wf_drag_cb, LV_EVENT_PRESS_LOST, NULL);
 
-    /* Spectrum line chart: objek gelap + gambar polyline di DRAW_MAIN. */
+    /* Spectrum line chart: objek gelap mencakup plot + strip label sumbu
+     * (kiri YLABEL_W, bawah XLABEL_H) — LVGL memotong gambar DRAW_MAIN ke
+     * clip area objek, jadi label harus dalam objek. */
     s_bar_obj = lv_obj_create(scr);
-    lv_obj_set_size(s_bar_obj, SCOPE_W, BAR_H);
-    lv_obj_set_pos(s_bar_obj, SCOPE_X, BAR_Y);
+    lv_obj_set_size(s_bar_obj, SCOPE_W + YLABEL_W, BAR_H + XLABEL_H);
+    lv_obj_set_pos(s_bar_obj, SCOPE_X - YLABEL_W, BAR_Y);
     lv_obj_set_style_bg_color(s_bar_obj, ui_col_topbar(), 0);
     lv_obj_set_style_bg_opa(s_bar_obj, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(s_bar_obj, 0, 0);
@@ -625,7 +642,8 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_peak_lbl, ui_col_peak_fg(), 0);
     lv_obj_set_style_text_font(s_peak_lbl, &lv_font_montserrat_14, 0);
     lv_label_set_text(s_peak_lbl, "20.000.000 Hz");
-    lv_obj_set_pos(s_peak_chip, 2, 4);
+    /* Chip child s_bar_obj: x relatif obj → +YLABEL_W (offset strip kiri). */
+    lv_obj_set_pos(s_peak_chip, YLABEL_W + 2, 4);
 
     s_timer = lv_timer_create(scope_timer_cb, 30, NULL);
     if (s_timer == NULL) {
