@@ -181,7 +181,7 @@ static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
         db_marks[2] = (int)lroundf(hi);
         n_marks = 3;
     }
-    static const int32_t hz_marks[] = {-2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000};
+    static const int32_t hz_marks[] = {-500, -250, 0, 250, 500};
     lv_point_precise_t pts[2];
 
     lv_draw_line_dsc_t ld;
@@ -223,7 +223,7 @@ static void draw_grid(lv_layer_t *layer, const lv_area_t *coords)
 static void draw_scale_labels(lv_layer_t *layer, const lv_area_t *coords)
 {
     const int32_t h = coords->y2 - coords->y1 + 1;
-    const int32_t hz_marks[] = {-2000, -1000, 0, 1000, 2000};
+    const int32_t hz_marks[] = {-500, -250, 0, 250, 500};
     /* Grid dBFS dinamis — sama persis dengan logika di draw_grid(). */
     const float lo = s_db_min;
     const float hi = SCOPE_DB_MAX;
