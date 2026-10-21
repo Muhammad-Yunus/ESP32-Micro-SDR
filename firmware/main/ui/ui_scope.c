@@ -36,7 +36,8 @@
 #define YLABEL_W          30
 #define XLABEL_H          18
 #define PLOT_PAD_R         8    /* padding grid chart vs tepi kanan LCD     */
-#define WF_W               (SCOPE_W + YLABEL_W) /* kanva WF mentok kiri x=0 */
+#define WF_W               (SCOPE_W + YLABEL_W + PLOT_PAD_R) /* WF full LCD */
+#define WF_CX              (YLABEL_W + SCOPE_W / 2) /* pusat frekuensi (screen x) */
 #define WF_FALLBACK_ROWS   44
 #define BAR_GAP            2
 #define BAR_H              128
@@ -135,6 +136,50 @@ static float scope_val(const float *db, int x, int nbins)
 {
     int k0, k1;
     scope_bin_range(x, nbins, &k0, &k1);
+    float v = db[k0];
+    for (int k = k0 + 1; k < k1; k++) {
+        if (db[k] > v) {
+            v = db[k];
+        }
+    }
+    return v;
+}
+
+/* Rentang bin untuk kolom waterfall pada koordinat layar sx (0..WF_W-1).
+ * Skala frekuensi identik dgn chart (pusat di WF_CX, half_px = SCOPE_W/2),
+ * sehingga puncak waterfall tetap segaris dgn puncak spektrum. Kolom di
+ * luar tepi plot (sx < YLABEL_W / > YLABEL_W+SCOPE_W) memakai bin FFT di
+ * luar ±span — mengisi penuh lebar LCD tanpa strip warna solid. */
+static void wf_bin_range(int sx, int nbins, int *k0, int *k1)
+{
+    const int center = nbins / 2;
+    const float half_px = (float)(SCOPE_W / 2);
+    const float span = (float)CONFIG_SDR_DISPLAY_SPAN_HZ *
+                       (float)nbins / (float)CONFIG_SDR_AUDIO_FS_HZ;
+
+    int a = center + (int)(((float)(sx - WF_CX) + 0.5f) * span / half_px);
+    int b = center + (int)(((float)(sx - WF_CX) + 1.5f) * span / half_px);
+    if (b <= a) {
+        b = a + 1;
+    }
+    if (a < 0) {
+        a = 0;
+    }
+    if (b > nbins) {
+        b = nbins;
+    }
+    if (a >= b) {
+        a = b - 1;
+    }
+    *k0 = a;
+    *k1 = b;
+}
+
+/* Nilai waterfall kolom layar sx: maksimum bin dalam rentang. */
+static float wf_val(const float *db, int sx, int nbins)
+{
+    int k0, k1;
+    wf_bin_range(sx, nbins, &k0, &k1);
     float v = db[k0];
     for (int k = k0 + 1; k < k1; k++) {
         if (db[k] > v) {
@@ -424,7 +469,7 @@ static void bar_draw_cb(lv_event_t *e)
 /* ------------------------------------------------------------------ */
 
 /* Dorong satu baris (warna dari db) ke bawah; baris terbaru di atas.
- * Kanva WF_W kolom: YLABEL_W kiri gelap + SCOPE_W spektrum. */
+ * Kanva selebar WF_W (full LCD): semua kolom berisi spektrum nyata. */
 static void wf_push_row(const float *db, int nbins)
 {
     if (s_wf_buf == NULL || s_nbins <= 0) {
@@ -435,16 +480,11 @@ static void wf_push_row(const float *db, int nbins)
 
     memmove(buf + WF_W, buf, stride * (size_t)(s_wf_rows - 1));
 
-    /* Strip kiri (mentok tepian LCD): biru antara 0x004070 (chart bg)
-     * dgn #0030BD — sesuai persepsi background waterfall. */
-    const uint16_t bg = lv_color_to_u16(lv_color_hex(0x004090));
-    for (int x = 0; x < YLABEL_W; x++) {
-        buf[x] = bg;
-    }
-    /* Kolom spektrum: sejajar grid chart (x0..SCOPE_W-1 pada YLABEL_W). */
-    for (int x = 0; x < SCOPE_W; x++) {
-        const float f = db_frac(scope_val(db, x, nbins));
-        buf[YLABEL_W + x] = ui_wf_color((int)(f * (float)(UI_WF_LUT_N - 1)));
+    /* Seluruh lebar LCD (WF_W kolom): skala frekuensi sama dgn chart,
+     * puncak segaris; tepi kiri/kanan terisi bin FFT nyata (tanpa strip). */
+    for (int x = 0; x < WF_W; x++) {
+        const float f = db_frac(wf_val(db, x, nbins));
+        buf[x] = ui_wf_color((int)(f * (float)(UI_WF_LUT_N - 1)));
     }
     lv_obj_invalidate(s_canvas);
 }
@@ -616,8 +656,8 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
     lv_obj_t *scr = (parent != NULL) ? parent : lv_screen_active();
 
     /* Waterfall canvas (RGB565, buffer heap; fallback 48 baris).
-     * Lebar WF_W = YLABEL_W + SCOPE_W: YLABEL_W kolom kiri gelap (mentok
-     * x=0) + SCOPE_W kolom spektrum (sejajar grid chart x30..471). */
+     * Lebar WF_W = full LCD (SCOPE_W + YLABEL_W + PLOT_PAD_R): spektrum
+     * di-stretch selebar layar, skala sama dgn chart → puncak segaris. */
     s_wf_rows = CONFIG_SDR_WATERFALL_ROWS;
     size_t buf_size = (size_t)WF_W * (size_t)s_wf_rows * sizeof(uint16_t);
     s_wf_buf = heap_caps_malloc(buf_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
