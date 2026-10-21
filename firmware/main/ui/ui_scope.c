@@ -746,7 +746,7 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
     lv_obj_clear_flag(s_peak_chip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     s_peak_lbl = lv_label_create(s_peak_chip);
     lv_obj_set_style_text_color(s_peak_lbl, ui_col_peak_fg(), 0);
-    lv_obj_set_style_text_font(s_peak_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_peak_lbl, &lv_font_montserrat_10, 0);
     lv_label_set_text(s_peak_lbl, "20.000 MHz @ 0 dBFS");
     /* Chip child s_bar_obj: x relatif obj → +YLABEL_W (offset strip kiri). */
     lv_obj_set_pos(s_peak_chip, YLABEL_W + 2, 4);
