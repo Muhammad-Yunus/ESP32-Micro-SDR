@@ -59,6 +59,7 @@ static inline uint16_t ui_wf_color(int idx)
 static inline lv_color_t ui_col_scope_line(void) { return lv_color_hex(0xE5E793); }
 static inline lv_color_t ui_col_peak(void)       { return lv_color_hex(0xFF5A3D); }
 static inline lv_color_t ui_col_peak_fg(void)    { return lv_color_hex(0x151605); }
+static inline lv_color_t ui_col_peak_tri(void)   { return lv_color_hex(0xFFD54A); }
 static inline lv_color_t ui_col_grid(void)       { return lv_color_hex(0x3E4011); }
 static inline lv_color_t ui_col_grid_dc(void)    { return lv_color_hex(0x5C5E1B); }
 static inline lv_color_t ui_col_grid_text(void)  { return lv_color_hex(0xB7B86C); }
