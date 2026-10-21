@@ -35,7 +35,7 @@
 #define SCOPE_W            450
 #define YLABEL_W          30
 #define XLABEL_H          18
-#define WF_H               44
+#define PLOT_PAD_R         8    /* padding grid chart vs tepi kanan LCD     */
 #define WF_FALLBACK_ROWS   44
 #define BAR_GAP            2
 #define BAR_H              128
@@ -164,7 +164,7 @@ static void get_plot_rect(const lv_area_t *obj, plot_rect_t *out)
 {
     out->x1 = obj->x1 + YLABEL_W;
     out->y1 = obj->y1;
-    out->x2 = obj->x2;
+    out->x2 = obj->x2 - PLOT_PAD_R;
     out->y2 = obj->y1 + BAR_H - 1;
     out->h  = BAR_H;
 }
