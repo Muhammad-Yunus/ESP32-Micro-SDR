@@ -584,6 +584,24 @@ static void update_peak(const float *db, int nbins)
             }
         }
     }
+    /* Posisi marker = piksel puncak VISUAL garis lerp (bf = best_bin),
+     * bukan piksel pertama yang mencakup bin puncak. Lerp peak ada di
+     * bf = best_bin; piksel pertama cakupan bin bisa ~21 px di kiri apex. */
+    {
+        const int center = nbins / 2;
+        const float half_px = (float)(SCOPE_W / 2);
+        const float span = (float)CONFIG_SDR_DISPLAY_SPAN_HZ * (float)nbins /
+                           (float)CONFIG_SDR_AUDIO_FS_HZ;
+        float xf = half_px - 0.5f +
+                   ((float)best_bin - (float)center) * half_px / span;
+        int bx = (int)lroundf(xf);
+        if (bx < 0) {
+            bx = 0;
+        } else if (bx >= SCOPE_W) {
+            bx = SCOPE_W - 1;
+        }
+        best_x = bx;
+    }
     s_peak_x = best_x;
 
     /* Floor robust: persentil 25 dari nilai per piksel (464 sampel).
