@@ -131,20 +131,6 @@ static void scope_bin_range(int x, int nbins, int *k0, int *k1)
     *k1 = b;
 }
 
-/* Nilai tampilan kolom x: maksimum bin dalam rentang (pertahankan puncak). */
-static float scope_val(const float *db, int x, int nbins)
-{
-    int k0, k1;
-    scope_bin_range(x, nbins, &k0, &k1);
-    float v = db[k0];
-    for (int k = k0 + 1; k < k1; k++) {
-        if (db[k] > v) {
-            v = db[k];
-        }
-    }
-    return v;
-}
-
 /* Rentang bin untuk kolom waterfall pada koordinat layar sx (0..WF_W-1).
  * Skala frekuensi identik dgn chart (pusat di WF_CX, half_px = SCOPE_W/2),
  * sehingga puncak waterfall tetap segaris dgn puncak spektrum. Kolom di
@@ -187,6 +173,33 @@ static float wf_val(const float *db, int sx, int nbins)
         }
     }
     return v;
+}
+
+/* Nilai tampilan kolom x dgn interpolasi linear antar bin (dipakai line
+ * chart). Saat zoom, 1 bin FFT (~46.9 Hz) melebar ~21 px; tanpa interpolasi
+ * nilainya konstan sepanjang itu → chart tampak "stepped". Interpolasi
+ * di koordinat bin kontinu membuat kurva tersambung mulus. */
+static float scope_val_lerp(const float *db, int x, int nbins)
+{
+    const int center = nbins / 2;
+    const int half_px = SCOPE_W / 2;
+    const float span = (float)CONFIG_SDR_DISPLAY_SPAN_HZ *
+                       (float)nbins / (float)CONFIG_SDR_AUDIO_FS_HZ;
+
+    const float bf = (float)center + ((float)x - (float)half_px + 0.5f) *
+                     span / (float)half_px;
+    int i0 = (int)floorf(bf);
+    float t = bf - (float)i0;
+    if (i0 < 0) {
+        i0 = 0;
+        t = 0.0f;
+    } else if (i0 > nbins - 2) {
+        i0 = nbins - 2;
+        t = 1.0f;
+    }
+    const float v0 = db[i0];
+    const float v1 = db[i0 + 1];
+    return v0 + (v1 - v0) * t;
 }
 
 /* Frekuensi (Hz, relatif DC) → x piksel (kebalikan scope_bin_range). */
@@ -439,7 +452,7 @@ static void bar_draw_cb(lv_event_t *e)
     dsc.point_cnt = SCOPE_W;
 
     for (int x = 0; x < SCOPE_W; x++) {
-        const float f = db_frac(scope_val(s_db, x, s_nbins));
+        const float f = db_frac(scope_val_lerp(s_db, x, s_nbins));
         s_chart_pts[x].x = (lv_value_precise_t)(pr.x1 + x);
         s_chart_pts[x].y =
             (lv_value_precise_t)(pr.y2 - (int32_t)(f * (float)(pr.h - 1)));
