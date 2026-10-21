@@ -435,10 +435,11 @@ static void wf_push_row(const float *db, int nbins)
 
     memmove(buf + WF_W, buf, stride * (size_t)(s_wf_rows - 1));
 
-    /* Strip kiri (mentok tepian LCD): warna LUT tergelap (noise floor). */
-    const uint16_t dark = ui_wf_color(0);
+    /* Strip kiri (mentok tepian LCD): warna sama dengan background waterfall. */
+    const lv_color_t bgc = ui_col_bg();
+    const uint16_t bg = (uint16_t)(bgc.red << 11) | (bgc.green << 6) | bgc.blue;
     for (int x = 0; x < YLABEL_W; x++) {
-        buf[x] = dark;
+        buf[x] = bg;
     }
     /* Kolom spektrum: sejajar grid chart (x0..SCOPE_W-1 pada YLABEL_W). */
     for (int x = 0; x < SCOPE_W; x++) {
