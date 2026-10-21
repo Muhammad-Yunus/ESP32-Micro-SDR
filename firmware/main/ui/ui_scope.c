@@ -244,14 +244,14 @@ static void draw_grid(lv_layer_t *layer, const plot_rect_t *pr)
     } else if (range > 150.0f) {
         step = 20.0f;
     }
-    int db_marks[8];
+    int db_marks[16];
     int n_marks = 0;
     /* Mulai dari kelipatan step pertama di atas lo, s.d. hi. */
     float first = (float)((int)(lo / step)) * step;
     if (first < lo) {
         first += step;
     }
-    for (float v = first; v <= hi + 0.5f && n_marks < 8; v += step) {
+    for (float v = first; v <= hi + 0.5f && n_marks < 16; v += step) {
         db_marks[n_marks++] = (int)lroundf(v);
     }
     /* Kalau tidak ada (range < step), gambar 3 garis: lo, tengah, hi. */
@@ -315,13 +315,13 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
     } else if (range > 150.0f) {
         step = 20.0f;
     }
-    int db_marks[8];
+    int db_marks[16];
     int n_marks = 0;
     float first = (float)((int)(lo / step)) * step;
     if (first < lo) {
         first += step;
     }
-    for (float v = first; v <= hi + 0.5f && n_marks < 8; v += step) {
+    for (float v = first; v <= hi + 0.5f && n_marks < 16; v += step) {
         db_marks[n_marks++] = (int)lroundf(v);
     }
     if (n_marks == 0) {
@@ -332,7 +332,7 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
     }
     /* Buffer statis: pointer teks dipakai draw task hingga render. */
     static char x_text[5][16];
-    static char y_text[8][8];
+    static char y_text[16][8];
 
     /* X axis = LO + nco_offset + offset grid, MHz 3 desimal (1 kHz/tick). */
     sdr_config_t cfg;
