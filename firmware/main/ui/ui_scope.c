@@ -36,6 +36,7 @@
 #define YLABEL_W          30
 #define XLABEL_H          18
 #define PLOT_PAD_R         8    /* padding grid chart vs tepi kanan LCD     */
+#define WF_W               (SCOPE_W + YLABEL_W) /* kanva WF mentok kiri x=0 */
 #define WF_FALLBACK_ROWS   44
 #define BAR_GAP            2
 #define BAR_H              128
@@ -422,20 +423,27 @@ static void bar_draw_cb(lv_event_t *e)
 /* Waterfall                                                           */
 /* ------------------------------------------------------------------ */
 
-/* Dorong satu baris (warna dari db) ke bawah; baris terbaru di atas. */
+/* Dorong satu baris (warna dari db) ke bawah; baris terbaru di atas.
+ * Kanva WF_W kolom: YLABEL_W kiri gelap + SCOPE_W spektrum. */
 static void wf_push_row(const float *db, int nbins)
 {
     if (s_wf_buf == NULL || s_nbins <= 0) {
         return;
     }
-    const size_t stride = (size_t)SCOPE_W * sizeof(uint16_t);
+    const size_t stride = (size_t)WF_W * sizeof(uint16_t);
     uint16_t *buf = (uint16_t *)s_wf_buf;
 
-    memmove(buf + SCOPE_W, buf, stride * (size_t)(s_wf_rows - 1));
+    memmove(buf + WF_W, buf, stride * (size_t)(s_wf_rows - 1));
 
+    /* Strip kiri (mentok tepian LCD): warna LUT tergelap (noise floor). */
+    const uint16_t dark = ui_wf_color(0);
+    for (int x = 0; x < YLABEL_W; x++) {
+        buf[x] = dark;
+    }
+    /* Kolom spektrum: sejajar grid chart (x0..SCOPE_W-1 pada YLABEL_W). */
     for (int x = 0; x < SCOPE_W; x++) {
         const float f = db_frac(scope_val(db, x, nbins));
-        buf[x] = ui_wf_color((int)(f * (float)(UI_WF_LUT_N - 1)));
+        buf[YLABEL_W + x] = ui_wf_color((int)(f * (float)(UI_WF_LUT_N - 1)));
     }
     lv_obj_invalidate(s_canvas);
 }
@@ -606,13 +614,15 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
 {
     lv_obj_t *scr = (parent != NULL) ? parent : lv_screen_active();
 
-    /* Waterfall canvas (RGB565, buffer heap; fallback 48 baris). */
+    /* Waterfall canvas (RGB565, buffer heap; fallback 48 baris).
+     * Lebar WF_W = YLABEL_W + SCOPE_W: YLABEL_W kolom kiri gelap (mentok
+     * x=0) + SCOPE_W kolom spektrum (sejajar grid chart x30..471). */
     s_wf_rows = CONFIG_SDR_WATERFALL_ROWS;
-    size_t buf_size = (size_t)SCOPE_W * (size_t)s_wf_rows * sizeof(uint16_t);
+    size_t buf_size = (size_t)WF_W * (size_t)s_wf_rows * sizeof(uint16_t);
     s_wf_buf = heap_caps_malloc(buf_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (s_wf_buf == NULL && s_wf_rows > WF_FALLBACK_ROWS) {
         s_wf_rows = WF_FALLBACK_ROWS;
-        buf_size = (size_t)SCOPE_W * (size_t)s_wf_rows * sizeof(uint16_t);
+        buf_size = (size_t)WF_W * (size_t)s_wf_rows * sizeof(uint16_t);
         s_wf_buf = heap_caps_malloc(buf_size,
                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
@@ -622,9 +632,9 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
     memset(s_wf_buf, 0, buf_size);
 
     s_canvas = lv_canvas_create(scr);
-    lv_canvas_set_buffer(s_canvas, s_wf_buf, SCOPE_W, s_wf_rows,
+    lv_canvas_set_buffer(s_canvas, s_wf_buf, WF_W, s_wf_rows,
                          LV_COLOR_FORMAT_RGB565);
-    lv_obj_set_pos(s_canvas, SCOPE_X, WF_Y);
+    lv_obj_set_pos(s_canvas, 0, WF_Y);
     lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_canvas, wf_drag_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_canvas, wf_drag_cb, LV_EVENT_PRESSING, NULL);
