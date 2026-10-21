@@ -375,8 +375,12 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
     td.text = "dBFS";
     lv_draw_label(layer, &td, &unit);
 
-    /* Label dBFS di strip kiri, align kanan, 3 px padding dari tepi plot. */
+    /* Label dBFS di strip kiri, align kanan, 3 px padding dari tepi plot.
+     * 0 dBFS dilewati — strip atas direserve utk label satuan "dBFS". */
     for (int i = 0; i < n_marks; i++) {
+        if (db_marks[i] == 0) {
+            continue;
+        }
         const int32_t y = pr->y2 -
             (int32_t)(db_frac((float)db_marks[i]) * (float)(pr->h - 1));
         lv_area_t a = {
