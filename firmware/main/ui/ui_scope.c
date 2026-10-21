@@ -329,8 +329,9 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
         if (hz < 0) {
             hz = 0;
         }
-        snprintf(x_text[i], sizeof(x_text[i]), "%u.%03u M",
-                 (unsigned)(hz / 1000000), (unsigned)((hz / 1000) % 1000));
+        /* 5 desimal MHz (resolusi 10 Hz) agar tick 500 Hz terbaca. */
+        snprintf(x_text[i], sizeof(x_text[i]), "%u.%05u M",
+                 (unsigned)(hz / 1000000), (unsigned)((hz % 1000000) / 10));
     }
 
     /* Y axis label = dBFS aktual (dasar dinamis, 0 dBFS = full-scale I/Q). */
@@ -380,7 +381,7 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
      * - label pertama (hz=-500): align kiri  di tepi kiri plot  (x1, lebar 52 px)
      * - label terakhir (hz=+500): align kanan di tepi kanan plot (lebar 52 px)
      * - label tengah: align center di tengah tick */
-    const int32_t lbl_w = 52;   /* cukup untuk 8 karakter @Montserrat 10 (~48 px) */
+    const int32_t lbl_w = 64;   /* 10 karakter "xx.xxxxx M" @Montserrat 10 */
     for (size_t i = 0; i < 5; i++) {
         int32_t x = pr->x1 + freq_to_x(hz_marks[i]);
         lv_area_t a;
