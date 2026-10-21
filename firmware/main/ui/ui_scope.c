@@ -68,7 +68,6 @@ static float s_db_min = SCOPE_DB_MIN_FLOOR; /* dasar chart dinamis (state) */
 /* Line chart (F6): titik per piksel + marker puncak merah + chip freq. */
 static lv_point_precise_t s_chart_pts[SCOPE_W];
 static lv_point_precise_t s_marker_pts[2];
-static lv_point_precise_t s_tri_pts[4];       /* segitiga penanda puncak    */
 static lv_obj_t *s_peak_chip;
 static lv_obj_t *s_peak_lbl;
 static int s_peak_x = -1;                       /* piksel puncak (bar)     */
@@ -480,28 +479,24 @@ static void bar_draw_cb(lv_event_t *e)
         s_marker_pts[1].y = (lv_value_precise_t)pr.y2;
         lv_draw_line(layer, &mdsc);
 
-        /* Segitiga kuning di puncak, mengikuti peak naik/turun.
-         * Apex mengarah ke bawah, sejajar nilai puncak. */
+        /* Segitiga kuning isi, jarak 10 px di atas nilai puncak,
+         * mengikuti peak naik/turun. Apex mengarah ke bawah. */
         const int32_t px = pr.x1 + s_peak_x;
         int32_t py = pr.y2 - (int32_t)(s_peak_frac * (float)(pr.h - 1));
-        if (py < pr.y1 + 10) {
-            py = pr.y1 + 10;   /* jaga tetap di dalam plot */
+        if (py < pr.y1 + 21) {
+            py = pr.y1 + 21;   /* jaga segitiga tetap di dalam plot */
         }
-        s_tri_pts[0].x = (lv_value_precise_t)px;              /* apex    */
-        s_tri_pts[0].y = (lv_value_precise_t)py;
-        s_tri_pts[1].x = (lv_value_precise_t)(px - 5);        /* kiri    */
-        s_tri_pts[1].y = (lv_value_precise_t)(py - 9);
-        s_tri_pts[2].x = (lv_value_precise_t)(px + 5);        /* kanan   */
-        s_tri_pts[2].y = (lv_value_precise_t)(py - 9);
-        s_tri_pts[3] = s_tri_pts[0];                          /* tutup   */
-        lv_draw_line_dsc_t tdsc;
-        lv_draw_line_dsc_init(&tdsc);
-        tdsc.color = ui_col_peak_tri();
-        tdsc.width = 1;
-        tdsc.opa = LV_OPA_COVER;
-        tdsc.points = s_tri_pts;
-        tdsc.point_cnt = 4;
-        lv_draw_line(layer, &tdsc);
+        lv_draw_triangle_dsc_t trid;
+        lv_draw_triangle_dsc_init(&trid);
+        trid.p[0].x = (lv_value_precise_t)px;             /* apex (bawah) */
+        trid.p[0].y = (lv_value_precise_t)(py - 10);
+        trid.p[1].x = (lv_value_precise_t)(px - 5);       /* kiri atas    */
+        trid.p[1].y = (lv_value_precise_t)(py - 19);
+        trid.p[2].x = (lv_value_precise_t)(px + 5);       /* kanan atas   */
+        trid.p[2].y = (lv_value_precise_t)(py - 19);
+        trid.color = ui_col_peak_tri();
+        trid.opa = LV_OPA_COVER;
+        lv_draw_triangle(layer, &trid);
     }
 
     draw_scale_labels(layer, &pr, &coords);
