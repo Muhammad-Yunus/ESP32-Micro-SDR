@@ -34,10 +34,13 @@
 /* 7-segment LO display font (main/ui/font_dseg7_36.c, DSEG7 Classic Bold). */
 LV_FONT_DECLARE(font_dseg7_36)
 
-/* Bottom bar geometry: 7 buttons, total width must fit 480. */
+/* Bottom bar geometry: 7 buttons, total width must fit 480.
+ * Layout:  8|64|8|44|8|100|8|44|8|52|8|56|8|56|8  = 480
+ * (KB→vol− gap fixed: 8, not 12 as before). */
 #define UI_BTN_MODE_W      64
 #define UI_BTN_TUNE_W      44   /* [-] and [+]                              */
 #define UI_BTN_STEP_W       100
+#define UI_BTN_KB_W        52
 #define UI_BTN_VOL_W        56
 
 typedef enum {
@@ -644,6 +647,7 @@ static lv_obj_t *btn_create(lv_obj_t *parent, const char *txt, int32_t w,
     lv_obj_set_style_shadow_width(btn, 0, 0);
     lv_obj_t *lbl = lv_label_create(btn);
     lv_label_set_text(lbl, txt);
+    lv_obj_set_style_text_color(lbl, ui_col_fg(), 0);
     lv_obj_center(lbl);
     if (cb != NULL) {
         lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
@@ -672,10 +676,12 @@ static lv_obj_t *vol_btn_create(lv_obj_t *parent, bool is_up)
 
     lv_obj_t *ic = lv_label_create(btn);
     lv_label_set_text(ic, LV_SYMBOL_VOLUME_MID);
+    lv_obj_set_style_text_color(ic, ui_col_fg(), 0);
     lv_obj_set_style_text_font(ic, &lv_font_montserrat_16, 0);
 
     lv_obj_t *sign = lv_label_create(btn);
     lv_label_set_text(sign, is_up ? LV_SYMBOL_PLUS : LV_SYMBOL_MINUS);
+    lv_obj_set_style_text_color(sign, ui_col_fg(), 0);
     lv_obj_set_style_text_font(sign, &lv_font_montserrat_10, 0);
 
     lv_obj_add_event_cb(btn, is_up ? vol_up_cb : vol_down_cb, LV_EVENT_CLICKED,
@@ -933,6 +939,7 @@ esp_err_t ui_init(void)
     }
     s_label_step_btn = lv_label_create(btn);
     lv_label_set_text(s_label_step_btn, "100 Hz");
+    lv_obj_set_style_text_color(s_label_step_btn, ui_col_fg(), 0);
     lv_obj_add_event_cb(btn, step_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_align(btn, LV_ALIGN_TOP_LEFT, x, y);
     x += UI_BTN_STEP_W + UI_BTN_GAP;
@@ -941,11 +948,11 @@ esp_err_t ui_init(void)
     lv_obj_align(btn, LV_ALIGN_TOP_LEFT, x, y);
     x += UI_BTN_TUNE_W + UI_BTN_GAP;
 
-    btn = btn_create(bot, LV_SYMBOL_KEYBOARD, 52, keypad_btn_cb);
+    btn = btn_create(bot, LV_SYMBOL_KEYBOARD, UI_BTN_KB_W, keypad_btn_cb);
     lv_obj_set_style_text_font(lv_obj_get_child(btn, 0),
                                &lv_font_montserrat_16, 0);
     lv_obj_align(btn, LV_ALIGN_TOP_LEFT, x, y);
-    x += UI_BTN_VOL_W + UI_BTN_GAP;
+    x += UI_BTN_KB_W + UI_BTN_GAP;
 
     btn = vol_btn_create(bot, false);
     lv_obj_align(btn, LV_ALIGN_TOP_LEFT, x, y);
