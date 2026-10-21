@@ -435,9 +435,9 @@ static void wf_push_row(const float *db, int nbins)
 
     memmove(buf + WF_W, buf, stride * (size_t)(s_wf_rows - 1));
 
-    /* Strip kiri (mentok tepian LCD): sama dgn warna tergelap waterfall
-     * (LUT[0]) agar menyatu dengan noise floor / background waterfall. */
-    const uint16_t bg = ui_wf_color(0);
+    /* Strip kiri (mentok tepian LCD): biru terang ~#0030BD agar menyatu
+     * dgn background waterfall (lebih terang dari 0x004070). */
+    const uint16_t bg = lv_color_to_u16(lv_color_hex(0x0030BD));
     for (int x = 0; x < YLABEL_W; x++) {
         buf[x] = bg;
     }
