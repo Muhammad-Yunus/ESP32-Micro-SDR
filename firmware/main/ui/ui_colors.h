@@ -15,7 +15,7 @@
 
 /* Screen & chrome */
 static inline lv_color_t ui_col_bg(void)       { return lv_color_hex(0x101103); }
-static inline lv_color_t ui_col_topbar(void)   { return lv_color_hex(0x1C1E06); }
+static inline lv_color_t ui_col_topbar(void)   { return lv_color_hex(0x2E3009); }
 static inline lv_color_t ui_col_botbar(void)   { return lv_color_hex(0x161805); }
 static inline lv_color_t ui_col_modal(void)    { return lv_color_hex(0x262808); }
 
