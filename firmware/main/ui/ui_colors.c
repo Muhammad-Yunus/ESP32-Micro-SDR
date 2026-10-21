@@ -15,7 +15,7 @@ const uint16_t ui_wf_lut[UI_WF_LUT_N] = {
     /*  4 */ 0x0012,
     /*  5 */ 0x0016,
     /*  6 */ 0x001B,
-    /*  7 */ 0x001F,  /* biru pekat               */
+    /*  7 */ 0x001D,  /* biru pekat               */
     /*  8 */ 0x001F,
     /*  9 */ 0x013F,
     /* 10 */ 0x025F,
@@ -23,7 +23,7 @@ const uint16_t ui_wf_lut[UI_WF_LUT_N] = {
     /* 12 */ 0x049F,
     /* 13 */ 0x05BF,
     /* 14 */ 0x06DF,
-    /* 15 */ 0x07FF,  /* cyan                     */
+    /* 15 */ 0x075F,  /* cyan                     */
     /* 16 */ 0x07FF,
     /* 17 */ 0x27FB,
     /* 18 */ 0x4FF6,
@@ -31,7 +31,7 @@ const uint16_t ui_wf_lut[UI_WF_LUT_N] = {
     /* 20 */ 0x97ED,
     /* 21 */ 0xB7E9,
     /* 22 */ 0xDFE4,
-    /* 23 */ 0xFFE0,  /* kuning                   */
+    /* 23 */ 0xEFE2,  /* kuning                   */
     /* 24 */ 0xFFE0,
     /* 25 */ 0xFEC0,
     /* 26 */ 0xFDA0,

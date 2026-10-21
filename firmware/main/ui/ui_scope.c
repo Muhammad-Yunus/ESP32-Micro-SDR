@@ -64,6 +64,7 @@ static int s_wf_rows;
 static float s_db[CONFIG_SDR_FFT_N];
 static int s_nbins;
 static float s_db_min = SCOPE_DB_MIN_FLOOR; /* dasar chart dinamis (state) */
+static float s_wf_floor = -160.0f;          /* dasar warna waterfall (p25) */
 
 /* Line chart (F6): titik per piksel + marker puncak merah + chip freq. */
 static lv_point_precise_t s_chart_pts[SCOPE_W];
@@ -81,12 +82,36 @@ static int32_t s_drag_x0;
 /* Utilitas                                                            */
 /* ------------------------------------------------------------------ */
 
-/* dB → frac [0,1] untuk tinggi chart / indeks warna waterfall.
+/* dB → frac [0,1] untuk tinggi chart.
  * Dasar chart = s_db_min (dinamis, dihitung di update_peak);
  * atas tetap SCOPE_DB_MAX. */
 static float db_frac(float db)
 {
     const float lo = s_db_min;
+    const float hi = SCOPE_DB_MAX;
+    const float range = hi - lo;
+    if (range < 1.0f) {
+        return (db >= hi) ? 1.0f : 0.0f;
+    }
+    float f = (db - lo) / range;
+    if (f < 0.0f) {
+        f = 0.0f;
+    } else if (f > 1.0f) {
+        f = 1.0f;
+    }
+    return f;
+}
+
+/* dB → frac [0,1] untuk indeks warna waterfall.
+ * Dasar = s_wf_floor (p25 / noise floor riil) TANPA headroom 40 dB milik
+ * chart. Headroom itu hanya berguna agar titik chart melayang di atas dasar;
+ * dipakai untuk warna, ia membakar 8 indeks LUT untuk ruang kosong, sehingga
+ * naik sedikit dari noise floor langsung cyan dan puncak jadi sabuk cyan
+ * rata. Dgn dasar p25, seluruh rentang 0..31 dipakai konten sinyal →
+ * gradasi warna mengikuti bentuk pyramid puncak. */
+static float wf_frac(float db)
+{
+    const float lo = s_wf_floor;
     const float hi = SCOPE_DB_MAX;
     const float range = hi - lo;
     if (range < 1.0f) {
@@ -497,7 +522,7 @@ static void wf_push_row(const float *db, int nbins)
     /* Seluruh lebar LCD (WF_W kolom): skala frekuensi sama dgn chart,
      * puncak segaris; tepi kiri/kanan terisi bin FFT nyata (tanpa strip). */
     for (int x = 0; x < WF_W; x++) {
-        const float f = db_frac(wf_val(db, x, nbins));
+        const float f = wf_frac(wf_val(db, x, nbins));
         buf[x] = ui_wf_color((int)(f * (float)(UI_WF_LUT_N - 1)));
     }
     lv_obj_invalidate(s_canvas);
@@ -612,6 +637,15 @@ static void update_peak(const float *db, int nbins)
         chart_min = SCOPE_DB_MIN_CEIL;
     }
     s_db_min = chart_min;
+
+    /* Dasar warna waterfall = p25 asli (tanpa headroom), clamp [−180, 0]. */
+    float wf_floor = floor_est;
+    if (wf_floor < -180.0f) {
+        wf_floor = -180.0f;
+    } else if (wf_floor > SCOPE_DB_MIN_CEIL) {
+        wf_floor = SCOPE_DB_MIN_CEIL;
+    }
+    s_wf_floor = wf_floor;
 
     /* Frekuensi absolut = LO label + offset NCO + offset bin (DC = tuned). */
     sdr_config_t cfg;
