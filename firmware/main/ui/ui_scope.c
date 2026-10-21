@@ -32,7 +32,7 @@
  * (x30..479). Waterfall di bawah plot, x30..479. */
 #define SCOPE_X            30
 #define SCOPE_Y            (52 + 4)
-#define SCOPE_W            450
+#define SCOPE_W            442
 #define YLABEL_W          30
 #define XLABEL_H          18
 #define PLOT_PAD_R         8    /* padding grid chart vs tepi kanan LCD     */
@@ -382,7 +382,7 @@ static void bar_draw_cb(lv_event_t *e)
 
     draw_grid(layer, &pr);
 
-    /* Line chart biru muda, satu draw task (polyline 422 titik). */
+    /* Line chart biru muda, satu draw task (polyline SCOPE_W titik). */
     lv_draw_line_dsc_t dsc;
     lv_draw_line_dsc_init(&dsc);
     dsc.color = ui_col_scope_line();
@@ -635,7 +635,8 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
      * (kiri YLABEL_W, bawah XLABEL_H) — LVGL memotong gambar DRAW_MAIN ke
      * clip area objek, jadi label harus dalam objek. */
     s_bar_obj = lv_obj_create(scr);
-    lv_obj_set_size(s_bar_obj, SCOPE_W + YLABEL_W, BAR_H + XLABEL_H);
+    lv_obj_set_size(s_bar_obj, SCOPE_W + YLABEL_W + PLOT_PAD_R,
+                    BAR_H + XLABEL_H);
     lv_obj_set_pos(s_bar_obj, SCOPE_X - YLABEL_W, BAR_Y);
     lv_obj_set_style_bg_color(s_bar_obj, ui_col_topbar(), 0);
     lv_obj_set_style_bg_opa(s_bar_obj, LV_OPA_COVER, 0);
