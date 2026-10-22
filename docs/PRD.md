@@ -35,7 +35,7 @@ detector (quadrature sampling detector) eksternal**.
 | Platform | ESP-IDF murni v6.1, target `esp32` klasik, bahasa C |
 | Audio out | **Sigma-delta (SDM) 1-bit pada GPIO26** (`esp_driver_sdm`, output dirutekan via GPIO matrix) → input FM8002A. `dac_continuous`/`bsp_audio_init()` TIDAK dipakai karena berbagi I2S0 dengan `adc_continuous` (lihat §7) |
 | LO | Eksternal; firmware hanya menampilkan *label* frekuensi (input via keypad) + offset NCO yang di-set user |
-| Sampling | 48 kHz per kanal, span spektrum ±3 kHz |
+| Sampling | 48 kHz per kanal → decim 12 kHz; span spektrum runtime ±250 Hz…±10 kHz (efektif ≤ ±6 kHz = Nyquist) |
 | LCD/touch | BSP `bsp_esp323248s035` (disalin dari repo referensi `ESP32-3248S035-CYD-SDR`) |
 
 ---
@@ -95,8 +95,9 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Rentang offset: **−2 MHz … +2 MHz** (`CONFIG_SDR_NCO_LIMIT_HZ`);
   step: 10 / 50 / 100 / 500 / 1k / 10k / 100k / 1M Hz.
   **Catatan fisika**: mixer NCO *digital* pada `fs = 48 kHz` hanya mampu
-  merealisasikan offset sampai ±24 kHz (Nyquist) dan praktis ±3 kHz (span).
-  Karena itu `SDR_NCO_LIMIT_HZ` adalah batas **rentang tuning UI / aritmetika
+  merealisasikan offset sampai ±24 kHz (Nyquist), sedangkan band yang
+  ditampilkan setelah decimasi ke 12 kHz hanya ±6 kHz. Karena itu
+  `SDR_NCO_LIMIT_HZ` adalah batas **rentang tuning UI / aritmetika
   label** (`lo_label + offset`); pergeseran kasar di luar band digital harus
   direalisasikan oleh LO eksternal (di luar firmware ini). Nilai digital yang
   benar-benar dicampur di-clamp ke band Nyquist/span oleh DSP di F5.
@@ -132,11 +133,20 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 ### FR-6 — Spektrum (FFT Bar)
 - FFT 1024 titik **pada IQ hasil decim 12 kHz** (11,7 Hz/bin), Hann window,
   maginitudo dalam dB.
-- Tampilan: bar spektrum selebar area (±3 kHz di tengah frekuensi tuned).
+- Kepadatan tampilan: `spectrum_get_db()` zero-pad ke 2048 titik
+  (5,86 Hz/bin, keluaran band penuh terpusat DC); titik line chart = bin
+  asli **tanpa interpolasi**, RBW asli tetap 11,7 Hz.
+- **Skala runtime** (ikon gear → Settings modal, replaces nilai build-time):
+  - mode FFT bin **1024** (11,72 Hz/bin) atau **2048** (5,86 Hz/bin); mode
+    1024 memakai bin genap DFT-2048 (identik dengan DFT-1024).
+  - span LO **±250 / ±500 / ±1k / ±2k / ±5k / ±10k Hz**; nilai efektif
+    dijepit ke FS/2 = 6 kHz (sampler 12 kHz) dan preset 10 kHz tetap
+    terpilih dengan readout nilai efektif.
+- Tampilan: bar spektrum selebar area tengah frekuensi tuned.
 - Refresh mengikuti timer UI (~30 ms); **frame boleh drop** (snapshot terbaru
   menangani yang lama).
 - **Acceptance**: tonal pada offset diketahui muncul pada kolom piksel yang
-  benar (±1 bin); SNR visual ≥ 40 dB.
+  benar (±1 bin) pada semua preset span & mode FFT bin; SNR visual ≥ 40 dB.
 
 ### FR-7 — Waterfall (Air Terjun)
 - Air terjun berwarna (LUT colormap 32 entri RGB565), mengalir ke bawah

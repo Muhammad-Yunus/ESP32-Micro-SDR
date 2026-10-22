@@ -119,13 +119,15 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
   ```
   CONFIG_SDR_ADC_FS_HZ=48000
   CONFIG_SDR_FFT_N=1024
-  CONFIG_SDR_DISPLAY_SPAN_HZ=3000
+  CONFIG_SDR_DISPLAY_SPAN_HZ=500
   CONFIG_SDR_BFO_HZ=1500
   CONFIG_SDR_WATERFALL_ROWS=64
   CONFIG_SDR_ADC_ATTEN_DB=11
   ```
 - Nilai default harus sama dengan yang tertulis di `sdkconfig.defaults`.
 - Mengubah default = mengubah dokumen (PRD/TECH_STACK) juga.
+- `CONFIG_SDR_DISPLAY_SPAN_HZ` hanya nilai **awal** span tampilan; span &
+  mode FFT bin diubah saat runtime dari Settings modal (`sdr_config`).
 
 ---
 

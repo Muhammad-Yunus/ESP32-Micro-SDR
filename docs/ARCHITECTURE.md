@@ -263,23 +263,34 @@ DILARANG:
 
 - Waterfall: `lv_canvas` RGB565 464×64 (≈ 60 KB); update = `memmove` turun
   satu baris + gambar baris baru + invalidate. Fallback RAM: 48 baris.
-- Spektrum: line chart biru muda 1 px digambar pada event `LV_EVENT_DRAW_MAIN`
-  (polyline 464 titik, tanpa buffer penuh). Tampilan zoom ±`SDR_DISPLAY_SPAN_HZ`
-  (≈1 bin/piksel; 512 bin untuk 464 px), nilai piksel = maksimum bin dalam
-  rentangnya — bukan point-sampling/interpolasi, jadi tekstur noise natural.
-  Puncak ditandai garis vertikal merah + chip merah (teks hitam, radius 0)
-  berisi frekuensi puncak (`lo_label_hz + nco_offset_hz + offset bin`),
-  diposisikan di samping marker. Waterfall memakai pemetaan yang sama.
-- Skala Y spektrum: **dBFS**, rentang tetap −100…+10 (grid + label tiap
-  20 dB di sisi kanan, satuan `dBFS` di pojok). Nilai di bawah −100
-  ter-clamp ke dasar chart (bukan overflow). Garis floor riil oranye:
-  minimum spektrum per frame; bila di bawah −100 garis ter-clamp ke dasar
-  chart dan label kiri menunjukkan nilai aktualnya. Nilai dBFS di-clamp
-  bawah −148 (di bawah noise floor riil) agar nilai minimum bukan
-  artifact floor log FFT.
-- Drag horizontal di waterfall mengubah `nco_offset_hz` sesuai span ±3 kHz.
+- Spektrum: line chart kuning pucat 1 px digambar pada event
+  `LV_EVENT_DRAW_MAIN` (polyline ±345 titik, tanpa buffer penuh) — **satu
+  titik per bin FFT**: nilai asli tanpa interpolasi, x = posisi frekuensi
+  bin. Window Hann 1024 @12 kHz di-zero-pad ke FFT 2048 (`SPECTRUM_FFT_N`)
+  → 5,86 Hz/bin; RBW asli tetap 11,7 Hz. Keluaran = **band penuh
+  terpusat DC** (index tengah = DC, index 0 = −FS/2 = −6 kHz), jumlah bin
+  runtime mengikuti mode FFT dari Settings modal: 2048 bin (5,86 Hz/bin) atau
+  1024 bin (11,72 Hz/bin — sama dengan DFT-1024 karena
+  `X₂₀₄₈[2m] == X₁₀₂₄[m]`). Bila bin dalam tampilan melebihi jumlah piksel,
+  chart digambar sebagai envelope maksimum per piksel.
+  Nilai per piksel (persentil floor) = maksimum bin dalam rentang pikselnya.
+- **Skala tampilan runtime** (diatur dari ikon gear → Settings modal, bukan
+  lagi build-time): span half-width ± Hz dari `sdr_config.span_half_hz`
+  (preset 250/500/1k/2k/5k/10k Hz) dan mode FFT bin (1024/2048). Span
+  di-clamp ke FS/2 = 6 kHz (`sdr_config_span_half_effective()`) karena
+  sampler 12 kHz hanya mencakup ±6 kHz; preset 10 kHz tetap terpilih tetapi
+  readout menampilkan nilai efektif. Grid vertikal & label Hz ikut span
+  aktif: {−S, −S/2, 0, +S/2, +S}. `CONFIG_SDR_DISPLAY_SPAN_HZ` kini hanya
+  nilai awal saat boot.
+- Skala Y spektrum: **dBFS**, dasar dinamis = persentil 25 noise floor −
+  40 dB (clamp [−180, 0]) sehingga trace selalu melayang 40 dB di atas
+  dasar chart; atas +10 dBFS. Grid horizontal otomatis (step 10/20/50 dB)
+  + label di strip kiri (satuan `dBFS` di pojok kiri atas, label 0
+  dilewati agar ruangnya untuk satuan); garis vertikal tiap 250 Hz + DC.
+- Drag horizontal di waterfall mengubah `nco_offset_hz` sesuai span aktif.
 - Keypad LVGL mengubah `nco_offset_hz` atau `lo_label_hz` (mode entry dipilih
   tombol).
+
 
 ---
 
