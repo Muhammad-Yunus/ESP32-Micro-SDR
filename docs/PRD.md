@@ -106,13 +106,13 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Sumber kontrol: (a) tombol ± pada UI, (b) keypad angka LVGL (direct entry),
   (c) drag horizontal di area waterfall.
 - Lookup sin/cos (LUT ≥ 1024 entri + interpolasi linear) — tanpa trig per-sampel.
-- **Acceptance**: tonal pada input I/Q berpindah di layar sesuai offset;
-  error frekuensi hasil tuning < 1 Hz pada 1 kHz (terverifikasi tone test).
-  *Status (self-test 2026-10-22): T03 (tone 2 000 Hz + offset 1 000 Hz)
-  mengukur puncak **1002,0 Hz** → galat 2 Hz. Batas ukur saat ini adalah
-  resolusi FFT 12 000/2048 = 5,86 Hz/bin dengan capture 85 ms, sehingga
-  syarat < 1 Hz belum dapat dibuktikan. Perlu estimator presisi (Goertzel
-  ≥ 1 s) atau revisi acceptance — menunggu keputusan.*
+- **Acceptance** (direvisi 2026-10-22): tonal pada input I/Q berpindah di
+  layar sesuai offset; galat frekuensi hasil tuning **≤ 1 bin DFT-2048
+  (5,86 Hz)** pada capture 85 ms. Terukur di board: puncak jatuh di bin
+  **1001,95 Hz** untuk tone 2 000 Hz + offset 1 000 Hz (galat 1,95 Hz =
+  0,33 bin, murni kuantisasi bin) → terpenuhi. Presisi < 1 Hz tidak
+  dijanjikan oleh readout spektrum (butuh estimator terpisah/lebih
+  panjang — di luar v1).
 
 ### FR-4 — Demodulasi SSB (USB/LSB)
 - Struktur **Weaver / phasing dua mixer** (bukan Hilbert — dipilih karena
@@ -306,6 +306,12 @@ gain ≥ +90 dB pada input −50 dBFS — tidak realistis untuk AGC audio karena
 noise floor ikut dikuatkan. T09b tetap dilaporkan sebagai WARN (bukan FAIL)
 setiap kali input uji berada di bawah lantai AGC, sehingga penurunan batas
 `SDR_AGC_GAIN_MAX` di masa depan akan terdeteksi.
+
+Acceptance FR-3 juga direvisi (keputusan pengguna, 2026-10-22): syarat lama
+"galat < 1 Hz pada 1 kHz" tidak dapat dibuktikan dengan readout spektrum
+(resolusi 5,86 Hz/bin, capture 85 ms). Acceptance baru: **galat ≤ 1 bin
+(5,86 Hz)**; T03/T04 memakai toleransi 1 bin (`ST_PEAK_TOL_HZ`) agar
+regresi geser frekuensi > 5,86 Hz langsung FAIL.
 
 ---
 

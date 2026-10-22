@@ -62,7 +62,8 @@ static const char *TAG = "selftest";
 
 /* Lebar bin tampilan: 12000 Hz / 2048 bin = 5,859 Hz. */
 #define ST_BIN_HZ            (12000.0f / 2048.0f)
-#define ST_PEAK_TOL_HZ       (2.0f * ST_BIN_HZ)
+/* Toleransi posisi puncak = 1 bin (acceptance FR-3: galat <= 1 bin). */
+#define ST_PEAK_TOL_HZ       (1.0f * ST_BIN_HZ)
 
 /* ------------------------------------------------------------------ */
 /* Buffer statis (BSS) - tidak ada alokasi di loop                    */
