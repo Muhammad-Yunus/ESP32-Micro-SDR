@@ -279,9 +279,10 @@ static size_t dsp_process_block(const iq_t *in, size_t frames)
         }
     }
 
-    /* Tahap 5: BFO ke-2 — pemilih sideband (I' = audio setelah mix). */
+    /* Tahap 5: BFO ke-2 — pemilih sideband (I' = audio setelah mix).
+     * USB = sideband atas, LSB = sideband bawah (konvensi SSB). */
     const float bfo_hz =
-        (cfg.mode == SDR_MODE_LSB) ? (float)CONFIG_SDR_BFO_HZ
+        (cfg.mode == SDR_MODE_USB) ? (float)CONFIG_SDR_BFO_HZ
                                    : -(float)CONFIG_SDR_BFO_HZ;
     const float fs12 = (float)fs / 4.0f;
     dsp_rotator(&s_bfo_phase, bfo_hz / fs12, s_f12_i, s_f12_q,
@@ -343,10 +344,11 @@ esp_err_t dsp_chain_init(void)
     dsp_chain_reset();
     ESP_LOGI(TAG,
              "DSP F5: DC R %.3f | LPF %d tap %.0f Hz 48->24->12 | BFO +/-"
-             "%d Hz | audio LPF %.0f Hz | AGC target %d | audio %d Hz",
+             "%d Hz | audio LPF %.0f Hz | AGC target %d gain maks %d | "
+             "audio %d Hz",
              DSP_DC_R, DSP_HB_TAPS, CONFIG_SDR_CH_LPF_HZ, CONFIG_SDR_BFO_HZ,
              CONFIG_SDR_AUDIO_LPF_HZ, CONFIG_SDR_AGC_TARGET,
-             CONFIG_SDR_AUDIO_FS_HZ);
+             (int)DSP_AGC_GAIN_MAX, CONFIG_SDR_AUDIO_FS_HZ);
     return ESP_OK;
 }
 

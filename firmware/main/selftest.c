@@ -632,32 +632,76 @@ static void st_test_volume(void)
            nonzero_at_zero, r1);
 }
 
-/* T09 - AGC: dua level input harus menghasilkan level output mirip (FR-5). */
-static void st_test_agc(void)
+/* Ukur level PCM (RMS + puncak) untuk tone uji pada amplitudo tertentu
+ * dengan AGC aktif (target dari Kconfig) dan volume 100 %. */
+static void st_measure_agc(float amp, float *out_rms, int *out_peak)
 {
     iq_gen_cfg_t cfg;
     iq_gen_t gen;
+
+    st_prepare(SDR_MODE_USB, 100, CONFIG_SDR_AGC_TARGET);
+    iq_gen_cfg_default(&cfg, (float)CONFIG_SDR_ADC_FS_HZ);
+    cfg.tone_count = 1;
+    cfg.tone_hz[0] = (float)s_pass_sign * ST_SIDEBAND_HZ;
+    cfg.tone_amp[0] = amp;
+    iq_gen_init(&gen, &cfg);
+    st_feed(&gen, ST_WARMUP_BLOCKS);
+    st_capture_end();
+    st_feed(&gen, ST_CAPTURE_BLOCKS);
+    s_capture_on = false;
+
+    *out_rms = st_rms(s_pcm, s_pcm_len);
+    *out_peak = st_peak_abs(s_pcm, s_pcm_len);
+}
+
+/* T09 - AGC meregulasi di dalam rentang kerjanya: dua level input dalam
+ * rentang yang masih bisa diatur AGC harus menghasilkan level output mirip. */
+static void st_test_agc(void)
+{
     float rms_hi = 0.0f;
     float rms_lo = 0.0f;
+    int peak_hi = 0;
+    int peak_lo = 0;
     char s1[16];
 
-    for (int lvl = 0; lvl < 2; lvl++) {
-        const float amp = (lvl == 0) ? 0.5f : 0.05f;   /* 20 dB berbeda */
-        st_prepare(SDR_MODE_USB, 100, CONFIG_SDR_AGC_TARGET);
-        iq_gen_cfg_default(&cfg, (float)CONFIG_SDR_ADC_FS_HZ);
-        cfg.tone_count = 1;
-        cfg.tone_hz[0] = (float)s_pass_sign * ST_SIDEBAND_HZ;
-        cfg.tone_amp[0] = amp;
-        iq_gen_init(&gen, &cfg);
-        st_feed(&gen, ST_WARMUP_BLOCKS);
-        st_capture_end();
-        st_feed(&gen, ST_CAPTURE_BLOCKS);
-        s_capture_on = false;
-        const float rms = st_rms(s_pcm, s_pcm_len);
-        if (lvl == 0) {
-            rms_hi = rms;
-        } else {
-            rms_lo = rms;
+    st_measure_agc(0.5f, &rms_hi, &peak_hi);
+    st_measure_agc(0.25f, &rms_lo, &peak_lo);
+
+    const float spread_db = 20.0f * log10f((rms_hi > 1e-6f ? rms_hi : 1e-6f) /
+                                            (rms_lo > 1e-6f ? rms_lo : 1e-6f));
+    const bool ok = (spread_db <= 6.0f);
+
+    st_f1(spread_db, s1, sizeof(s1));
+    st_add("T09", "AGC meregulasi (FR-5)", ok ? ST_PASS : ST_WARN,
+           "input 0,50 vs 0,25 FS: selisih output %s dB (PRD <= 6 dB) | "
+           "puncak %d vs %d (target %d)",
+           s1, peak_hi, peak_lo, CONFIG_SDR_AGC_TARGET);
+}
+
+/* T09b - rentang dinamis 20 dB: AGC hanya bisa mengompensasi selama gain
+ * yang dibutuhkan tersedia (<= DSP_AGC_GAIN_MAX). Kasus ini mengukur
+ * yaitu lantai AGC: level input terkecil yang masih bisa diatur. */
+static void st_test_agc_floor(void)
+{
+    static const float k_amp[] = {0.05f, 0.1f, 0.25f, 0.5f};
+    float rms_hi = 0.0f;
+    float rms_lo = 0.0f;
+    int peak_hi = 0;
+    int peak_lo = 0;
+    int floor_pct = -1;
+    char s1[16];
+
+    st_measure_agc(0.5f, &rms_hi, &peak_hi);
+    st_measure_agc(0.05f, &rms_lo, &peak_lo);
+
+    /* Lantai AGC: amplitudo terkecil yang masih mencapai 80 % target. */
+    for (size_t i = 0; i < (sizeof(k_amp) / sizeof(k_amp[0])); i++) {
+        float r = 0.0f;
+        int p = 0;
+        st_measure_agc(k_amp[i], &r, &p);
+        if (p >= (int)((float)CONFIG_SDR_AGC_TARGET * 0.8f)) {
+            floor_pct = (int)(k_amp[i] * 100.0f);
+            break;
         }
     }
 
@@ -666,9 +710,10 @@ static void st_test_agc(void)
     const bool ok = (spread_db <= 6.0f);
 
     st_f1(spread_db, s1, sizeof(s1));
-    st_add("T09", "kependence level AGC (FR-5)", ok ? ST_PASS : ST_WARN,
-           "selisih output 20 dB = %s dB (PRD <= 6 dB) | rms %d vs %d",
-           s1, (int)(rms_hi + 0.5f), (int)(rms_lo + 0.5f));
+    st_add("T09b", "rentang dinamis 20 dB (FR-5)", ok ? ST_PASS : ST_WARN,
+           "selisih output 20 dB = %s dB (PRD <= 6 dB) | lantai AGC: input "
+           "%d%% FS (gain maks %d) | puncak %d vs %d",
+           s1, floor_pct, (int)DSP_AGC_GAIN_MAX, peak_hi, peak_lo);
 }
 
 /* T10 - AGC: target level harus bisa dicapai (FR-5). */
@@ -852,14 +897,25 @@ void selftest_task(void *arg)
 
     if (usb_sign != 0 && lsb_sign != 0 && usb_sign == lsb_sign) {
         st_add("T07b", "USB/LSB sideband berbeda", ST_FAIL,
-               "USB dan LSB sama-sama memakai sideband %+d Hz", usb_sign);
+               "USB dan LSB sama-sama memakai sideband %+d Hz",
+               (int)(usb_sign * ST_SIDEBAND_HZ));
+    } else if (usb_sign != +1 || lsb_sign != -1) {
+        /* Konvensi SSB: USB = sideband atas, LSB = sideband bawah. */
+        st_add("T07b", "USB/LSB sideband berbeda", ST_FAIL,
+               "konvensi SSB terbalik: USB %+d Hz (harus +%d), "
+               "LSB %+d Hz (harus -%d)",
+               (int)(usb_sign * ST_SIDEBAND_HZ), (int)ST_SIDEBAND_HZ,
+               (int)(lsb_sign * ST_SIDEBAND_HZ), (int)ST_SIDEBAND_HZ);
     } else {
         st_add("T07b", "USB/LSB sideband berbeda", ST_PASS,
-               "USB memakai %+d Hz, LSB memakai %+d Hz", usb_sign, lsb_sign);
+               "USB %+d Hz (sideband atas), LSB %+d Hz (sideband bawah)",
+               (int)(usb_sign * ST_SIDEBAND_HZ),
+               (int)(lsb_sign * ST_SIDEBAND_HZ));
     }
 
     st_test_volume();
     st_test_agc();
+    st_test_agc_floor();
     st_test_agc_target();
     st_test_decimation();
     st_test_no_adc();

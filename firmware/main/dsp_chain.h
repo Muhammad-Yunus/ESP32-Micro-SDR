@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 #include "rx_adc.h"
 
@@ -24,14 +25,15 @@
 typedef void (*dsp_pcm_sink_t)(const int8_t *pcm, size_t n);
 
 /**
- * @brief Batas gain AGC (tahap 7): -36 dB .. +36 dB.
+ * @brief Batas gain AGC (tahap 7): -36 dB .. +54 dB (batas atas Kconfig).
  *
- * Karena gain maksimum hanya +36 dB, target AGC (CONFIG_SDR_AGC_TARGET)
- * hanya tercapai untuk level input > target/64. Self-test mengukur
- * perilaku ini (kasus T09/T10).
+ * Gain maksimum = CONFIG_SDR_AGC_GAIN_MAX (512 = +54 dB). Target AGC
+ * (CONFIG_SDR_AGC_TARGET) hanya tercapai untuk level input >=
+ * target / gain_max (mis. target 96 -> input >= 0,19 FS). Self-test
+ * mengukur perilaku ini (kasus T09/T10).
  */
 #define DSP_AGC_GAIN_MIN  (1.0f / 64.0f)
-#define DSP_AGC_GAIN_MAX  64.0f
+#define DSP_AGC_GAIN_MAX  ((float)CONFIG_SDR_AGC_GAIN_MAX)
 
 /** Siapkan state DSP (LUT NCO, koefisien FIR, alpha AGC). Panggil sebelum task dibuat. */
 esp_err_t dsp_chain_init(void);

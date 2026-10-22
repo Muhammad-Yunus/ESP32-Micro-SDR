@@ -129,6 +129,10 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - **Acceptance**: input −20 dBFS dan −50 dBFS menghasilkan keluaran dalam
   ±6 dB satu sama lain; tidak ada klik/dorongan saat AGC beroperasi;
   underrun antrean audio = 0 saat steady-state.
+  *Status (self-test 2026-10-22): gain maksimum `SDR_AGC_GAIN_MAX` = 512
+  (+54 dB); AGC meregulasi untuk input ≥ 0,19 FS (target 96). Span 30 dB
+  (−20 → −50 dBFS) butuh gain ≥ +90 dB sehingga acceptance ini **belum
+  terpenuhi** — lihat §6.1 T-A2.*
 
 ### FR-6 — Spektrum (FFT Bar)
 - FFT 1024 titik **pada IQ hasil decim 12 kHz** (11,7 Hz/bin), Hann window,
@@ -257,23 +261,27 @@ oleh pengguna di board.
 
 ### 6.1 Hasil verifikasi self-test (FR-11, 2026-10-22)
 
-Build `CONFIG_SDR_SELFTEST=y` di board: **14 kasus → 12 PASS, 2 WARN, 0 FAIL**
-(log serial tag `selftest`). Selain memverifikasi acceptance FR yang ada, self-test
-menemukan **dua bug produksi** (spektrum datar karena salah indeks snapshot;
-delay line FIR 32 float meleset 4 float) dan **satu ketidaksesuaian acceptance**
-(AGC). Item berikut **memerlukan keputusan pengguna** sebelum perilaku produksi
-diubah:
+Build `CONFIG_SDR_SELFTEST=y` di board: **15 kasus → 14 PASS, 1 WARN, 0 FAIL**
+(log serial tag `selftest`). Self-test juga menemukan **dua bug produksi** yang
+sudah diperbaiki (spektrum datar karena salah indeks snapshot; delay line FIR
+32 float meleset 4 float) dan memicu **dua perubahan perilaku** atas keputusan
+pengguna: polaritas USB/LSB ditukar dan batas gain AGC dinaikkan.
 
-| # | Temuan | Bukti (terukur di board) | Dampak | Usulan |
-| :--- | :--- | :--- | :--- | :--- |
-| T-A | **AGC tidak pernah meregulasi**: gain selalu terkunci di batas atas `DSP_AGC_GAIN_MAX` = 64 (+36 dB) karena target 96 memerlukan gain ≥ 150 pada input full-scale | T10: puncak PCM 38 (target 96); T09: selisih output 20 dB input = 19,5 dB (PRD ≤ 6 dB); log produksi `g 64.0` | FR-5 acceptance tidak terpenuhi; AGC efektif jadi penguat tetap | Naikkan batas gain (mis. 512 = +54 dB) **atau** turunkan target AGC ke ≤ 40 (target dihitung dari mean-abs envelope) |
-| T-B | **Label USB/LSB terbalik**: mode USB memilih sideband **bawah** (f_in −2000 Hz → audio −500 Hz), LSB memilih sideband **atas** (+2000 Hz → +500 Hz) — berlawanan dengan konvensi SSB (USB = sideband atas) dan dengan teks FR-4 | T06/T07: "USB memakai −2000 Hz, LSB memakai +2000 Hz" | Sideband yang tertangkap terbalik dari ekspektasi pengguna | Tukar tanda `bfo_hz` pada `dsp_chain.c` (satu baris) **atau** koreksi teks FR-4 |
-| T-C | Penolakan image **jauh melampaui** syarat FR-4 (≥ 25 dB): audio LPF 64 tap menahan image ±116 dB | T06/T07: "image tolak ≥ 116,2 dB" (dibatasi kuantisasi int8) | Tidak ada masalah — acceptance FR-4 terpenuhi | Tidak ada perubahan; catatan saja |
+| # | Temuan | Bukti terukur (board) | Status |
+| :--- | :--- | :--- | :--- |
+| T-A | **AGC tidak pernah meregulasi** saat `DSP_AGC_GAIN_MAX` = 64 (+36 dB): target 96 butuh gain ≈ 160 pada input 1,0 FS | Sebelum: T10 puncak PCM 38 (target 96), T09 selisih 19,5 dB, log produksi `g 64.0` | **Diperbaiki** — batas gain jadi Kconfig `SDR_AGC_GAIN_MAX` = 512 (+54 dB). Sesudah: T09 selisih 2,4 dB (input 0,50 → 0,25 FS, syarat ≤ 6 dB) PASS; T10 puncak 102 (target 96) PASS; log produksi `g 512.0` |
+| T-A2 | **Rentang dinamis 20 dB belum tercapai**: AGC hanya bisa mengompensasi selama gain tersedia (≤ 512) | T09b: input 0,50 vs 0,05 FS → selisih output 16,5 dB (syarat ≤ 6 dB); lantai AGC = 25 % FS (input ≥ 0,19 FS agar target 96 tercapai) | WARN — perlu keputusan: naikkan batas gain (2048 = +66 dB, dengan risiko noise floor ikut dikuatkan) atau revisi acceptance FR-5 |
+| T-B | **Label USB/LSB terbalik**: USB memilih sideband bawah, LSB sideband atas — berlawanan dengan FR-4 dan konvensi SSB | Sebelum: USB −2000 Hz, LSB +2000 Hz | **Diperbaiki** — tanda `bfo_hz` ditukar; kini T06 USB +2000 Hz (sideband atas), T07 LSB −2000 Hz (sideband bawah), T07b PASS sesuai FR-4 |
+| T-C | Penolakan image **jauh melampaui** syarat FR-4 (≥ 25 dB): audio LPF 64 tap + decimasi menahan image sampai batas kuantisasi | T06/T07: image tolak ≥ 116,2 dB (AGC mati) / ≥ 157,1 dB (AGC aktif) | PASS — acceptance FR-4 terpenuhi; angka hanya batas bawah karena image < 0,5 LSB `int8` |
 
-Catatan: pengukuran image di atas memakai AGC **mati** (`agc_target = 0`).
-Dengan AGC aktif, gain tetap sama untuk signal maupun image sehingga rasionya
-tidak berubah; angka > 100 dB berarti image jatuh di bawah lantai kuantisasi
-`int8` (±0,5 LSB), sehingga hanya bisa dilaporkan sebagai batas bawah.
+Catatan: pengukuran image memakai AGC **mati** (`agc_target = 0`) untuk
+mengukur penolakan sebenarnya; dengan AGC aktif gain sama untuk sinyal maupun
+image sehingga rasio tidak berubah (AGC hanya menggeser keduanya).
+
+Acceptance FR-5 (`input −20 dBFS dan −50 dBFS` ⇒ keluaran ±6 dB) memerlukan
+gain ≥ +90 dB pada input −50 dBFS — tidak realistis untuk AGC audio
+(noise floor ikut dikuatkan). Status: **belum terpenuhi** dan menunggu
+keputusan revisi acceptance atau kenaikan `SDR_AGC_GAIN_MAX`.
 
 ---
 

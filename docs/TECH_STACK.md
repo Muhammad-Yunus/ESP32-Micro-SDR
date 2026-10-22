@@ -160,6 +160,10 @@ CONFIG_SDR_WATERFALL_ROWS=60
 CONFIG_SDR_DEFAULT_VOLUME_PCT=0                # default mute, naik lewat Vol+/Vol−
 CONFIG_SDR_ADC_ATTEN_DB=11
 CONFIG_SDR_ADC_POOL_BYTES=8192
+CONFIG_SDR_AGC_TARGET=96                     # target AGC (0 = AGC off)
+CONFIG_SDR_AGC_ATTACK_MS=5.0
+CONFIG_SDR_AGC_RELEASE_MS=200.0
+CONFIG_SDR_AGC_GAIN_MAX=512.0                # batas gain AGC linear (+54 dB)
 CONFIG_SDR_SELFTEST=n                         # y = build self-test (FR-11), tanpa ADC
 ```
 

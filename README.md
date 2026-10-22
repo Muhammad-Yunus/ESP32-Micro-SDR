@@ -40,7 +40,7 @@
 - [x] ADC DMA I/Q 48 kHz/kanal (continuous, 12-bit, pool internal 8 KB)
 - [x] DC block + NCO offset digital (LUT 1024 + interp linear)
 - [x] Demodulasi SSB Weaver (USB/LSB, BFO 1500 Hz) @12 kHz pasca-decimation
-- [x] AGC (attack 5 ms / release 200 ms) + volume 0–100 %
+- [x] AGC (attack 5 ms / release 200 ms, gain −36…+54 dB) + volume 0–100 %
 - [x] Audio out sigma-delta 1-bit @10 MHz carrier (GPIO26 → FM8002A)
 - [x] Spektrum: jendela Hann 1024 @12 kHz di-zero-pad ke FFT 2048 (5,86 Hz/bin),
       skala dBFS; mode bin **1024/2048** (11,72 / 5,86 Hz/bin) bisa diganti
@@ -55,7 +55,7 @@
       (mode, ±, step, keypad, volume)
 - [x] **Self-test DSP on-target** (`CONFIG_SDR_SELFTEST=y`, default `n`): I/Q
       sintetis disuntikkan ke rantai DSP **tanpa ADC** (GPIO35/36 bebas),
-      14 kasus uji (generator, DC removal, NCO, spektrum, demod USB/LSB,
+      15 kasus uji (generator, DC removal, NCO, spektrum, demod USB/LSB,
       volume, AGC, decimasi) dengan laporan PASS/WARN/FAIL di log serial
 
 ---
@@ -75,7 +75,7 @@ idf.py build && idf.py -p <PORT> flash monitor
   ditangkap `dsp_chain_set_pcm_sink()`.
 - Laporan per kasus di log serial (tag `selftest`), contoh:
   ```
-  I (2848) selftest: === RINGKASAN: 14 kasus -> 12 PASS, 2 WARN, 0 FAIL ===
+  I (3325) selftest: === RINGKASAN: 15 kasus -> 14 PASS, 1 WARN, 0 FAIL ===
   ```
 - Setelah selesai pengujian firmware masuk **mode demo**: 2 tone sintetis
   mengalir ke spektrum/waterfall dan audio, sehingga UI tetap hidup tanpa RF.

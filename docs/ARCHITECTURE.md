@@ -247,9 +247,9 @@ Ukuran RAM terverifikasi di board (ESP32 klasik, tanpa PSRAM):
 | 2 | DC removal | `y[n] = x[n] − x[n−1] + R·y[n−1]`, `R = 0.996` (~30 Hz), per kanal, **sebelum** NCO | 48 kHz |
 | 3 | NCO offset | `I' = I·c + Q·s`, `Q' = Q·c − I·s`, `φ += 2π·f_offset/fs`; sin/cos dari LUT 1024 + interp linear; step per-blok (fase kontinu) | 48 kHz |
 | 4 | LPF kanal + decimasi | Halfband/double-halfband 2,7 kHz, 48→24→12 kHz (`dsps_fir_dec2_f32` / `dsps_fir_f32`), state tersimpan antar blok | 12 kHz |
-| 5 | BFO ke-2 (pemilih sideband) | USB: `I' = I·c + Q·s`, `Q' = Q·c − I·s` dengan `φ_B += −2π·1500/fs`; LSB: tanda `+` pada maju fase (tukar tanda sin) | 12 kHz |
+| 5 | BFO ke-2 (pemilih sideband) | `I' = I·c + Q·s`, `Q' = Q·c − I·s` dengan `φ_B += 2π·f_BFO/fs`; **USB: `f_BFO = +1500`** (frekuensi turun → sideband atas lolos), **LSB: `f_BFO = −1500`** (frekuensi naik → sideband bawah lolos) | 12 kHz |
 | 6 | Audio LPF | FIR ~2,0 kHz pada komponen I hasil mix (band audio 300–2700 terjemah ke ±1200 Hz) | 12 kHz |
-| 7 | AGC + volume | env attack 5 ms / release 200 ms; `gain = clamp(target/env)`; smooth; kelipat ×volume; clip ke `int8` (pulse density SDM) | 12 kHz |
+| 7 | AGC + volume | env attack 5 ms / release 200 ms; `gain = clamp(target/env, 1/64, SDR_AGC_GAIN_MAX)`; smooth; kelipat ×volume; clip ke `int8` (pulse density SDM) | 12 kHz |
 
 Catatan desain:
 - Struktur dua-mixer (Weaver) dipilih; Hilbert FIR adalah varian setara — jika
@@ -266,8 +266,10 @@ Catatan desain:
   sampel per blok 256 frame).
 - Parameter tahap §6 dikumpulkan di Kconfig (NFR-9): `SDR_DC_POLE_R`,
   `SDR_CH_LPF_HZ`, `SDR_AUDIO_LPF_HZ`, `SDR_AGC_TARGET` (0 = AGC off),
-  `SDR_AGC_ATTACK_MS`, `SDR_AGC_RELEASE_MS`; override runtime `agc_target`
-  lewat `sdr_config`.
+  `SDR_AGC_ATTACK_MS`, `SDR_AGC_RELEASE_MS`, `SDR_AGC_GAIN_MAX` (batas gain
+  linear, default 512 = +54 dB); override runtime `agc_target` lewat
+  `sdr_config`. Target AGC hanya tercapai bila level input ≥ target/gain_max
+  (self-test T09/T09b/T10 mengukur batas ini).
 - Parameter display (F6): `SDR_FFT_N` (jendela analisis, 1024),
   `SDR_AUDIO_FS_HZ` (12 000 Hz — penentu lebar bin = FS/jumlah bin dan batas
   span FS/2 = 6 kHz), `SDR_DISPLAY_SPAN_HZ` (span awal ±500 Hz, dapat diubah

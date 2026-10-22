@@ -190,6 +190,17 @@ config SDR_AGC_RELEASE_MS
     help
         Envelope release time constant; alpha = 1 - exp(-1/(tau*fs)).
 
+config SDR_AGC_GAIN_MAX
+    float "Batas gain maksimum AGC (linear)"
+    range 1.0 4096.0
+    default 512.0
+    help
+        Gain maksimum AGC (linear): 512 = +54 dB. Target AGC hanya bisa
+        dicapai bila level input >= target / gain_max (mis. target 96
+        butuh input >= 0,19 FS). Menurunkan batas mengurangi penguatan
+        noise floor, menaikkan membuat AGC bisa mengatur sinyal lebih
+        lemah (risiko noise ikut dikuatkan).
+
 config SDR_SELFTEST
     bool "Self-test DSP (I/Q sintetis, tanpa ADC)"
     default n
