@@ -190,4 +190,14 @@ config SDR_AGC_RELEASE_MS
     help
         Envelope release time constant; alpha = 1 - exp(-1/(tau*fs)).
 
+config SDR_SELFTEST
+    bool "Self-test DSP (I/Q sintetis, tanpa ADC)"
+    default n
+    help
+        Build the on-target self-test suite (CONVENTIONS.md §5): the
+        DSP chain is fed with synthetic I/Q instead of the ADC, so
+        GPIO35/GPIO36 are never initialised. Results are printed to the
+        serial log (tag "selftest"). Keep DISABLED for production
+        firmware: the module adds ~29 KB of static buffers.
+
 endmenu

@@ -13,6 +13,7 @@
 #include "esp_chip_info.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #include "bsp_esp323248s035.h"
 #include "audio_out.h"
@@ -21,6 +22,10 @@
 #include "sdr_config.h"
 #include "spectrum.h"
 #include "ui/ui_main.h"
+
+#if CONFIG_SDR_SELFTEST
+#include "selftest.h"
+#endif
 
 static const char *TAG = "app";
 
@@ -69,13 +74,34 @@ void app_main(void)
     /*
      * ADC DMA start — TERAKHIR, agar konsumen data sudah siap.
      * Kegagalan di sini tidak fatal: UI tetap hidup (tanpa data I/Q).
+     *
+     * Mode self-test (CONFIG_SDR_SELFTEST=y): ADC TIDAK diinisialisasi
+     * sama sekali (GPIO35/GPIO36 tidak dipakai); data I/Q disuplai
+     * generator sintetis (CONVENTIONS.md §5).
      */
+#if CONFIG_SDR_SELFTEST
+    /*
+     * Task self-test: stack & TCB statis (8 KB) — heap internal setelah
+     * spectrum_init() sudah terfragmentasi sehingga alokasi stack dinamis
+     * tidak reliable, dan stack 4 KB memicu overflow.
+     */
+    ESP_LOGI(TAG, "heap internal: free %u byte, blok terbesar %u byte",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    if (!selftest_start()) {
+        ESP_LOGE(TAG, "gagal membuat selftest_task");
+    } else {
+        ESP_LOGI(TAG, "selftest_task dibuat (stack statis %u byte, Core 1)",
+                 (unsigned)8192);
+    }
+#else
     if (rx_adc_init() != ESP_OK) {
         ESP_LOGE(TAG, "rx_adc_init gagal — UI jalan tanpa sampling I/Q");
     } else if (xTaskCreatePinnedToCore(sdr_rx_task, "sdr_rx", 16384, NULL, 12,
                                        NULL, 1) != pdPASS) {
         ESP_LOGE(TAG, "gagal membuat sdr_rx_task");
     }
+#endif
 
     ESP_LOGI(TAG, "boot complete — free internal heap %u bytes",
              heap_caps_get_free_size(MALLOC_CAP_INTERNAL));

@@ -53,6 +53,34 @@
 - [x] Drag horizontal waterfall = tuning NCO offset
 - [x] UI LVGL 9.6: top bar (LO label + offset + volume + gear), bottom bar
       (mode, ±, step, keypad, volume)
+- [x] **Self-test DSP on-target** (`CONFIG_SDR_SELFTEST=y`, default `n`): I/Q
+      sintetis disuntikkan ke rantai DSP **tanpa ADC** (GPIO35/36 bebas),
+      14 kasus uji (generator, DC removal, NCO, spektrum, demod USB/LSB,
+      volume, AGC, decimasi) dengan laporan PASS/WARN/FAIL di log serial
+
+---
+
+## Self-Test DSP (tanpa sinyal RF, tanpa ADC)
+
+Build khusus untuk memverifikasi rantai DSP secara deterministik di board:
+
+```bash
+# firmware/sdkconfig.defaults → CONFIG_SDR_SELFTEST=y
+idf.py build && idf.py -p <PORT> flash monitor
+```
+
+- `rx_adc_init()` **tidak** dipanggil → GPIO35/GPIO36 tidak tersentuh.
+- Generator I/Q sintetis (`iq_gen`: tone/DC/noise ber-seed) disuntikkan ke
+  rantai DSP produksi lewat `dsp_chain_process_block()`; PCM hasil demodulasi
+  ditangkap `dsp_chain_set_pcm_sink()`.
+- Laporan per kasus di log serial (tag `selftest`), contoh:
+  ```
+  I (2848) selftest: === RINGKASAN: 14 kasus -> 12 PASS, 2 WARN, 0 FAIL ===
+  ```
+- Setelah selesai pengujian firmware masuk **mode demo**: 2 tone sintetis
+  mengalir ke spektrum/waterfall dan audio, sehingga UI tetap hidup tanpa RF.
+- **Kembalikan ke build produksi** (`CONFIG_SDR_SELFTEST=n`) sebelum flashing
+  ke board harian.
 
 ---
 
@@ -119,6 +147,8 @@ ESP32-Micro-SDR/
     │   ├── dsp_chain.c/h        # DC block, NCO, LPF/decim, Weaver, AGC, audio out
     │   ├── spectrum.c/h         # FFT 2048 zero-pad (jendela 1024) + dBFS
     │   ├── audio_out.c/h        # SDM 1-bit GPIO26 + audio_feed_task
+    │   ├── iq_gen.c/h           # Generator I/Q sintetis (build self-test)
+    │   ├── selftest.c/h         # Suite uji DSP on-target (build self-test)
     │   └── ui/
     │       ├── ui_main.c/h      # Layout, keypad, tombol, Settings modal
     │       ├── ui_scope.c/h     # Spectrum line chart + waterfall + drag

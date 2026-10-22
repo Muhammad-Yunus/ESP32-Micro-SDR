@@ -49,6 +49,7 @@ jangan memindahkan tanggung jawab antar file tanpa revisi dokumen ini.
 | `audio_feed_task` | 1 | **11** | 6 KB | `audio_out.c` | `app_main.c` |
 | `lvgl_task` | 0 | 4 | 6 KB | BSP (`bsp_lvgl.c`) | `bsp_lvgl_init()` |
 | `app_main` | 0 | 1 | 4 KB | `app_main.c` | sistem |
+| `selftest` | 1 | 12 | 8 KB (**statis**) | `selftest.c` | `app_main.c` → `selftest_start()` (**hanya build `CONFIG_SDR_SELFTEST=y`**) |
 
 Aturan:
 - Core 1 hanya berisi dua task di atas. Tidak ada logging berat, blocking file,
@@ -57,6 +58,12 @@ Aturan:
   `adc_continuous_read()`.
 - `audio_feed_task` dipacing oleh laju audio (menulis satu sampel `int8` ke
   kanal SDM setiap periode sampel; sumber pacing F4).
+- Task `selftest` adalah pengecualian satu-satunya: ia **menggantikan**
+  `sdr_rx_task` (bukan berdampingan) dan hanya ada pada build self-test. Stack
+  & TCB-nya statis karena heap internal setelah `spectrum_init()` sudah
+  terfragmentasi (stack dinamis 8 KB gagal dibuat, stack 4 KB overflow →
+  panic StoreProhibited).
+
 
 ---
 
@@ -76,6 +83,8 @@ firmware/
 │   ├── dsp_chain.c / dsp_chain.h   # seluruh DSP per blok + sdr_rx_task
 │   ├── audio_out.c / audio_out.h   # kanal SDM (GPIO26) + pool blok audio + audio_feed_task
 │   ├── spectrum.c / spectrum.h     # FFT esp-dsp → dB bins (dipanggil dari Core 0)
+│   ├── iq_gen.c / iq_gen.h         # generator I/Q sintetis (HANYA build self-test)
+│   ├── selftest.c / selftest.h     # suite uji DSP on-target (HANYA build self-test)
 │   └── ui/
 │       ├── ui_main.c / ui_main.h   # layout 480×320, freq text, tombol, keypad, modal Settings
 │       ├── ui_scope.c / ui_scope.h # widget spectrum bar + waterfall (skala runtime)
@@ -95,6 +104,8 @@ firmware/
 | `spectrum` | pool snapshot, buffer FFT miliknya, memanggil `ui_scope_push` | antrean audio, ADC |
 | `ui_*` | LVGL, `sdr_config_set_*`, `ui_scope_push` | panggilan blocking DSP/ADC, `sdm_channel_set_pulse_density` |
 | `sdr_config` | satu-satunya struktur yang dibaca/ditulis lintas core | — |
+| `iq_gen` | generator sinyal sintetis (tanpa hardware) | API DSP/UI, ADC |
+| `selftest` | meng-orak `dsp_chain_process_block()`, `sdr_config_set_*`, snapshot spektrum | ADC, audio_out, LVGL, `dsp_chain` internals |
 | BSP (`bsp_*`) | dianggap **black box**; hanya API publik di `bsp_esp323248s035.h` | **Jangan ubah kode BSP**; jangan panggil `bsp_init()`, `bsp_audio_init()`, `bsp_ldr_init()` |
 
 ### Fungsi publik minimum per modul
@@ -130,6 +141,23 @@ void      spectrum_ingest(const iq_t *snapshot1024); // panggil di Core 1 (dsp_c
 bool      spectrum_get_db(float *out_db, int *out_nbins); // drain terbaru → UI
                                                // out_db: *out_nbins nilai dB band
                                                // penuh terpusat DC (index tengah = DC)
+void      spectrum_set_consume_locked(bool locked);   // kunci snapshot (self-test)
+bool      spectrum_get_db_ex(float *out_db, int *out_nbins, bool ignore_lock);
+
+/* dsp_chain.h — hook self-test (dipakai juga di build produksi, tanpa efek) */
+size_t    dsp_chain_process_block(const iq_t *in, size_t frames); // proses 1 blok I/Q
+void      dsp_chain_set_pcm_sink(dsp_pcm_sink_t sink);  // NULL = audio_out_push
+void      dsp_chain_set_fs_hz(uint32_t fs_hz);           // 0 = laju terukur ADC
+#define DSP_AGC_GAIN_MIN  (1.0f / 64.0f)                  // −36 dB
+#define DSP_AGC_GAIN_MAX  64.0f                          // +36 dB (batas atas AGC)
+
+/* iq_gen.h (hanya build self-test) */
+void      iq_gen_cfg_default(iq_gen_cfg_t *cfg, float fs_hz);
+void      iq_gen_init(iq_gen_t *gen, const iq_gen_cfg_t *cfg);
+size_t    iq_gen_fill(iq_gen_t *gen, iq_t *out, size_t frames); // tone/DC/noise sintetis
+
+/* selftest.h (hanya build self-test) */
+bool      selftest_start(void);                        // buat task selftest (Core 1)
 
 /* sdr_config.h (lintas core) */
 typedef struct {
@@ -270,6 +298,12 @@ Langkah 11 dan 12 sudah aktif sejak F3.
 twiddle esp-dsp bersifat global; inisialisasi ulang akan menimpa tabel dan
 menghasilkan spektrum salah. Mode bin 1024/2048 hanya memilih cara *menyusun
 keluaran* dari FFT yang sama (lihat §3).
+
+Pada build self-test (`CONFIG_SDR_SELFTEST=y`) langkah 11–12 diganti:
+`rx_adc_init()` **tidak dipanggil** (GPIO35/GPIO36 bebas) dan
+`selftest_start()` membuat task `selftest` (Core 1, prio 12, stack statis
+8 KB). Rantai DSP tetap yang sama — hanya sumber bloknya `iq_gen` dan
+sink PCM-nya `dsp_chain_set_pcm_sink()`.
 
 DILARANG:
 - Memanggil `bsp_init()` (secara tidak langsung menginisialisasi LDR pada

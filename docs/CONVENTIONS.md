@@ -70,6 +70,12 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
 - Pembuatan task hanya di `app_main.c` (lihat ARCHITECTURE.md §7). Modul
   menyediakan entry point-nya sendiri, tetapi `xTaskCreatePinnedToCore`
   dipanggil satu tempat.
+- Pengecualian: build self-test (`CONFIG_SDR_SELFTEST=y`) memakai
+  `xTaskCreateStaticPinnedToCore()` di dalam `selftest.c` dengan stack & TCB
+  **statis** — heap internal setelah `spectrum_init()` terfragmentasi sehingga
+  stack dinamis 8 KB gagal dibuat dan stack 4 KB overflow (panic
+  StoreProhibited). Pemanggilan tetap dipicu dari `app_main.c`
+  (`selftest_start()`).
 - Core & prioritas persis tabel ARCHITECTURE.md §2 — jangan menambah task
   real-time baru tanpa revisi dokumen arsitektur.
 - Semua pemakaian `xQueueReceive`/`xQueueSend` menyebut timeout secara eksplisit
@@ -97,6 +103,17 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
   interface `audio_out` berupa `int8_t` (pulse density SDM, 8-bit).
 - Pengujian: sediakan hook tone-injection internal (bypass ADC) untuk M2 —
   jalur test tidak boleh mengaktifkan kode di production path.
+  **Sudah diterapkan (FR-11)**: hook berupa pemanggilan API yang sama dengan
+  jalur produksi, bukan cabang khusus —
+  `dsp_chain_process_block()` (blok I/Q masuk), `dsp_chain_set_pcm_sink()`
+  (penangkap PCM), `dsp_chain_set_fs_hz()` (laju sampel nominal) — plus
+  generator `iq_gen` dan suite `selftest`. Build produksi
+  (`CONFIG_SDR_SELFTEST=n`, default) tidak pernah mengaktifkan hook tersebut
+  dan tidak menambah BSS apa pun.
+- Log pada task uji: hindari `printf`/`%f` (jalur float newlib boros stack);
+  format bilat + helper konversi 1 desimal. Log berlabel PASS/WARN/FAIL.
+- Snapshot spektrum tertinggal 1–3 periode (85 ms) di belakang data terbaru →
+  pemanasan uji harus ≥ 4 periode snapshot sebelum mengukur.
 
 ---
 

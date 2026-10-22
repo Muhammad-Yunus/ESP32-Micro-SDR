@@ -160,7 +160,28 @@ CONFIG_SDR_WATERFALL_ROWS=60
 CONFIG_SDR_DEFAULT_VOLUME_PCT=0                # default mute, naik lewat Vol+/Vol−
 CONFIG_SDR_ADC_ATTEN_DB=11
 CONFIG_SDR_ADC_POOL_BYTES=8192
+CONFIG_SDR_SELFTEST=n                         # y = build self-test (FR-11), tanpa ADC
 ```
+
+### 5.1 Build self-test (`CONFIG_SDR_SELFTEST=y`)
+
+Build khusus untuk verifikasi rantai DSP on-target tanpa sinyal RF:
+
+```
+# firmware/sdkconfig.defaults  →  CONFIG_SDR_SELFTEST=y
+idf.py build && idf.py -p <PORT> flash monitor
+```
+
+- `main/CMakeLists.txt` menambahkan `selftest.c` + `iq_gen.c` hanya saat
+  `CONFIG_SDR_SELFTEST=y` → build produksi (`=n`) tidak menambah BSS maupun
+  kode.
+- `app_main.c` **tidak** memanggil `rx_adc_init()` pada build ini (GPIO35/36
+  tidak tersentuh); task `selftest` (Core 1, prio 12, stack statis 8 KB)
+  menyuntikkan I/Q sintetis ke rantai DSP yang sama.
+- Laporan: tag log `selftest`, baris per kasus `[PASS|WARN|FAIL] Txx ...`
+  ditutup `=== RINGKASAN: N kasus -> X PASS, Y WARN, Z FAIL ===`.
+- Build produksi tetap perlu diverifikasi setelahnya: kembalikan
+  `CONFIG_SDR_SELFTEST=n` lalu build + flash ulang.
 
 Catatan: ukuran flash partisi default skeleton = 2 MB — verifikasi ukuran flash
 sesungguhnya board dengan `esptool.py flash_id` saat M0 dan sesuaikan jika

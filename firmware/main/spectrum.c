@@ -55,6 +55,9 @@ static iq_t *s_pool[SP_POOL];
 /* Buffer FFT (interleaved 2×N float, aligned 16 untuk assembly esp-dsp). */
 static float *s_fft;
 
+/* Kunci konsumsi: true = snapshot tidak boleh diambil (self-test). */
+static volatile bool s_consume_locked;
+
 /* LUT Hann (jendela window 1024 titik). */
 static float s_hann[SP_N];
 
@@ -121,10 +124,23 @@ void spectrum_ingest(const iq_t *snapshot1024)
     }
 }
 
+void spectrum_set_consume_locked(bool locked)
+{
+    s_consume_locked = locked;
+}
+
 bool spectrum_get_db(float *out_db, int *out_nbins)
+{
+    return spectrum_get_db_ex(out_db, out_nbins, false);
+}
+
+bool spectrum_get_db_ex(float *out_db, int *out_nbins, bool ignore_lock)
 {
     if (s_snap_q == NULL) {
         return false;                           /* belum init (ui timer duluan) */
+    }
+    if (s_consume_locked && !ignore_lock) {
+        return false;                           /* terkunci (self-test aktif) */
     }
     iq_t *slot = NULL;
     if (xQueueReceive(s_snap_q, &slot, 0) != pdTRUE) {
@@ -133,8 +149,8 @@ bool spectrum_get_db(float *out_db, int *out_nbins)
 
     /* Hann window pada jendela 1024 sampel, sisanya nol (zero-pad). */
     for (int k = 0; k < SP_N; k++) {
-        s_fft[2 * k]     = slot->i * s_hann[k];
-        s_fft[2 * k + 1] = slot->q * s_hann[k];
+        s_fft[2 * k]     = slot[k].i * s_hann[k];
+        s_fft[2 * k + 1] = slot[k].q * s_hann[k];
     }
     memset(&s_fft[2 * SP_N], 0,
            2 * (SP_FFT_N - SP_N) * sizeof(float));

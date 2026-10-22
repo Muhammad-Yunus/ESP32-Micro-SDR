@@ -187,6 +187,25 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - **Acceptance**: nilai dBFS chip puncak berubah ≥ 10 Hz mengikuti sinyal uji
   dan agree dengan puncak garis spektrum.
 
+### FR-11 — Self-Test DSP On-Target (I/Q sintetis, tanpa ADC)
+- Build khusus (`CONFIG_SDR_SELFTEST=y`, default `n`): **ADC DMA tidak pernah
+  diinisialisasi** sehingga GPIO35/GPIO36 tidak tersentuh; sumber I/Q adalah
+  generator sintetis (`iq_gen`) yang disuntikkan ke rantai DSP produksi
+  melalui hook `dsp_chain_process_block()`.
+- Hook produksi yang ditambahkan (aktif di build produksi pun, tetapi tidak
+  pernah dipakai): `dsp_chain_process_block()` (blok I/Q eksternal),
+  `dsp_chain_set_pcm_sink()` (penangkap PCM), `dsp_chain_set_fs_hz()`
+  (laju sampel nominal). Tidak ada jalur "khusus test" di dalam rantai DSP —
+  hanya pemanggilan yang sama.
+- Cakupan: generator (T01), DC removal (T02), NCO offset (T03), spektrum &
+  mode bin 1024/2048 (T04–T05), demodulasi USB/LSB + penolakan image
+  (T06–T07b), skala volume (T08), AGC (T09–T10), rasio decimasi (T11),
+  ADC tidak dipakai (T12), kestabilan heap (T13).
+- Laporan ke log serial (tag `selftest`) dengan status **PASS / WARN / FAIL**;
+  WARN = berfungsi tetapi belum memenuhi acceptance FR terkait.
+- **Acceptance**: seluruh kasus PASS atau WARN (tidak boleh FAIL); tidak ada
+  panic/reboot; build produksi (`=n`) tetap berjalan identik.
+
 ---
 
 ## 4. Non-Functional Requirements
@@ -235,6 +254,26 @@ Status saat ini: M0–M4 **terpasang & berjalan di board** (F1 sampling, F2 UI,
 F3 ADC DMA, F4 audio SDM, F5 rantai DSP/AGC, F6 spektrum+waterfall+Settings
 runtime). Pengesahan visual (≥20 fps, tonal terlihat, AGC) dilakukan manual
 oleh pengguna di board.
+
+### 6.1 Hasil verifikasi self-test (FR-11, 2026-10-22)
+
+Build `CONFIG_SDR_SELFTEST=y` di board: **14 kasus → 12 PASS, 2 WARN, 0 FAIL**
+(log serial tag `selftest`). Selain memverifikasi acceptance FR yang ada, self-test
+menemukan **dua bug produksi** (spektrum datar karena salah indeks snapshot;
+delay line FIR 32 float meleset 4 float) dan **satu ketidaksesuaian acceptance**
+(AGC). Item berikut **memerlukan keputusan pengguna** sebelum perilaku produksi
+diubah:
+
+| # | Temuan | Bukti (terukur di board) | Dampak | Usulan |
+| :--- | :--- | :--- | :--- | :--- |
+| T-A | **AGC tidak pernah meregulasi**: gain selalu terkunci di batas atas `DSP_AGC_GAIN_MAX` = 64 (+36 dB) karena target 96 memerlukan gain ≥ 150 pada input full-scale | T10: puncak PCM 38 (target 96); T09: selisih output 20 dB input = 19,5 dB (PRD ≤ 6 dB); log produksi `g 64.0` | FR-5 acceptance tidak terpenuhi; AGC efektif jadi penguat tetap | Naikkan batas gain (mis. 512 = +54 dB) **atau** turunkan target AGC ke ≤ 40 (target dihitung dari mean-abs envelope) |
+| T-B | **Label USB/LSB terbalik**: mode USB memilih sideband **bawah** (f_in −2000 Hz → audio −500 Hz), LSB memilih sideband **atas** (+2000 Hz → +500 Hz) — berlawanan dengan konvensi SSB (USB = sideband atas) dan dengan teks FR-4 | T06/T07: "USB memakai −2000 Hz, LSB memakai +2000 Hz" | Sideband yang tertangkap terbalik dari ekspektasi pengguna | Tukar tanda `bfo_hz` pada `dsp_chain.c` (satu baris) **atau** koreksi teks FR-4 |
+| T-C | Penolakan image **jauh melampaui** syarat FR-4 (≥ 25 dB): audio LPF 64 tap menahan image ±116 dB | T06/T07: "image tolak ≥ 116,2 dB" (dibatasi kuantisasi int8) | Tidak ada masalah — acceptance FR-4 terpenuhi | Tidak ada perubahan; catatan saja |
+
+Catatan: pengukuran image di atas memakai AGC **mati** (`agc_target = 0`).
+Dengan AGC aktif, gain tetap sama untuk signal maupun image sehingga rasionya
+tidak berubah; angka > 100 dB berarti image jatuh di bawah lantai kuantisasi
+`int8` (±0,5 LSB), sehingga hanya bisa dilaporkan sebagai batas bawah.
 
 ---
 

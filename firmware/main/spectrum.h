@@ -50,6 +50,16 @@ esp_err_t spectrum_init(void);
 void spectrum_ingest(const iq_t *snapshot1024);
 
 /**
+ * @brief Kunci konsumsi snapshot (self-test).
+ *
+ * Saat terkunci, spectrum_get_db() selalu mengembalikan false sehingga
+ * snapshot tidak diambil konsumen lain (task UI Core 0). Dipakai self-test
+ * agar snapshot yang diukur benar-benar data yang baru saja di-ingest.
+ * Production: biarkan terbuka (default false).
+ */
+void spectrum_set_consume_locked(bool locked);
+
+/**
  * @brief Mengambil hasil spektrum terbaru dalam urutan display (Core 0).
  *
  * Mengonversi snapshot terbaru → Hann → zero-pad SPECTRUM_FFT_N → FFT →
@@ -63,3 +73,12 @@ void spectrum_ingest(const iq_t *snapshot1024);
  * @return true bila ada frame baru; false bila tidak ada (UI skip render).
  */
 bool spectrum_get_db(float *out_db, int *out_nbins);
+
+/**
+ * @brief Sama seperti spectrum_get_db(), tetapi dapat melewati kunci konsumsi.
+ *
+ * `ignore_lock = true` dipakai pemilik kunci (self-test) untuk mengambil
+ * snapshot yang terkunci; konsumen biasa (task UI) memakai
+ * spectrum_get_db() yang honor lock.
+ */
+bool spectrum_get_db_ex(float *out_db, int *out_nbins, bool ignore_lock);

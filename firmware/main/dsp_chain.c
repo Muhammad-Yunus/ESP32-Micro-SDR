@@ -50,8 +50,10 @@ static float s_hb1[DSP_HB_TAPS];                /* desain @48 kHz          */
 static float s_hb2[DSP_HB_TAPS];                /* desain @24 kHz          */
 static fir_f32_t s_fir_hb1_i, s_fir_hb1_q;
 static fir_f32_t s_fir_hb2_i, s_fir_hb2_q;
-static float s_dl_hb1_i[DSP_HB_TAPS], s_dl_hb1_q[DSP_HB_TAPS];
-static float s_dl_hb2_i[DSP_HB_TAPS], s_dl_hb2_q[DSP_HB_TAPS];
+/* Delay line esp-dsp harus N+4 float (SIMD menulis 4 elemen tambahan) —
+ * ukuran N saja menulis melewati batas (bug: menimpa delay line berikutnya). */
+static float s_dl_hb1_i[DSP_HB_TAPS + 4], s_dl_hb1_q[DSP_HB_TAPS + 4];
+static float s_dl_hb2_i[DSP_HB_TAPS + 4], s_dl_hb2_q[DSP_HB_TAPS + 4];
 
 /* Tahap 6: audio LPF @12 kHz. */
 #define DSP_AUD_TAPS          64
@@ -68,9 +70,7 @@ static float s_dc_q_x1, s_dc_q_y1;
 static float s_nco_phase;
 static float s_bfo_phase;
 
-/* Tahap 7: AGC. */
-#define DSP_AGC_GAIN_MIN      (1.0f / 64.0f)
-#define DSP_AGC_GAIN_MAX      64.0f
+/* Tahap 7: AGC (batas gain didefinisikan di dsp_chain.h). */
 #define DSP_AGC_SMOOTH        0.01f             /* tau ≈ 8 ms @ 12 kHz      */
 static float s_agc_env;
 static float s_agc_gain;
@@ -100,6 +100,10 @@ static float s_peak_q;
 static float s_audio_peak;
 static int64_t s_diag_t0_us;
 static uint32_t s_aud_prev;
+
+/* Hook self-test (lihat dsp_chain.h). Default: produksi penuh. */
+static dsp_pcm_sink_t s_pcm_sink;
+static uint32_t s_fs_override_hz;
 
 /* ----------------------------------------------------------------------
  * Utilitas
@@ -207,17 +211,17 @@ static int8_t dsp_agc_and_scale(float x, float vol, float target)
  * Proses satu blok I/Q (§6, 2 tahap 4 dkk. lihat header)
  * -------------------------------------------------------------------- */
 
-static void dsp_process_block(const iq_t *in, size_t frames)
+static size_t dsp_process_block(const iq_t *in, size_t frames)
 {
     if (frames < 4) {
-        return;
+        return 0;
     }
     const size_t n = frames & ~(size_t)1;       /* genap untuk decimasi    */
 
     sdr_config_t cfg;
     sdr_config_get(&cfg);
 
-    uint32_t fs = rx_adc_measured_fs_hz();
+    uint32_t fs = s_fs_override_hz ? s_fs_override_hz : rx_adc_measured_fs_hz();
     if (fs == 0) {
         fs = CONFIG_SDR_ADC_FS_HZ;
     }
@@ -298,7 +302,12 @@ static void dsp_process_block(const iq_t *in, size_t frames)
         }
     }
     s_audio_peak = apk;
-    audio_out_push(s_audio_i8, (size_t)n12);
+    if (s_pcm_sink != NULL) {
+        s_pcm_sink(s_audio_i8, (size_t)n12);
+    } else {
+        audio_out_push(s_audio_i8, (size_t)n12);
+    }
+    return frames;
 }
 
 /* ----------------------------------------------------------------------
@@ -307,6 +316,10 @@ static void dsp_process_block(const iq_t *in, size_t frames)
 
 esp_err_t dsp_chain_init(void)
 {
+    /* Default produksi: tanpa sink PCM override, laju dari ADC. */
+    s_pcm_sink = NULL;
+    s_fs_override_hz = 0;
+
     dsp_lut_init();
     dsp_lpf_design(s_hb1, DSP_HB_TAPS, CONFIG_SDR_CH_LPF_HZ,
                    (float)CONFIG_SDR_ADC_FS_HZ);
@@ -370,6 +383,21 @@ void dsp_chain_reset(void)
     s_diag_t0_us = esp_timer_get_time();
 }
 
+size_t dsp_chain_process_block(const iq_t *in, size_t frames)
+{
+    return dsp_process_block(in, frames);
+}
+
+void dsp_chain_set_pcm_sink(dsp_pcm_sink_t sink)
+{
+    s_pcm_sink = sink;
+}
+
+void dsp_chain_set_fs_hz(uint32_t fs_hz)
+{
+    s_fs_override_hz = fs_hz;
+}
+
 void sdr_rx_task(void *arg)
 {
     (void)arg;
@@ -397,7 +425,7 @@ void sdr_rx_task(void *arg)
         s_blocks++;
         s_frames += (uint32_t)frames;
 
-        dsp_process_block(s_block, frames);
+        dsp_chain_process_block(s_block, frames);
 
         const int64_t now_us = esp_timer_get_time();
         if (now_us - s_diag_t0_us >= DSP_DIAG_PERIOD_US) {
