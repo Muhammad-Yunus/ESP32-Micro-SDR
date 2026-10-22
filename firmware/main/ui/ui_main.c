@@ -15,11 +15,13 @@
 #include "bsp_esp323248s035.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "sdkconfig.h"
 #include "sdr_config.h"
 #include "ui/ui_colors.h"
 #include "ui/ui_scope.h"
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
 
 /* Layout landscape 480x320 (rotation 270). */
 #define UI_W               bsp_tft_width()
@@ -65,6 +67,17 @@ static lv_obj_t *s_kb;
 static lv_obj_t *s_btn_entry_off;
 static lv_obj_t *s_btn_entry_lo;
 static entry_target_t s_entry = ENTRY_OFFSET;
+
+/* Settings modal. */
+static lv_obj_t *s_modal_settings;
+static lv_obj_t *s_lbl_fft_bin_hz;
+static lv_obj_t *s_lbl_span_val;
+static lv_obj_t *s_btn_fft_1024;
+static lv_obj_t *s_btn_fft_2048;
+#define UI_SPAN_BTN_MAX 8
+static lv_obj_t *s_btn_span[UI_SPAN_BTN_MAX];
+static int32_t s_btn_span_val[UI_SPAN_BTN_MAX];
+static int s_btn_span_n;
 
 /* ------------------------------------------------------------------ */
 /* Formatting helpers                                                  */
@@ -206,6 +219,23 @@ static void modal_close(void)
         s_kb = NULL;
         s_btn_entry_off = NULL;
         s_btn_entry_lo = NULL;
+        lv_obj_delete_async(m);
+    }
+}
+
+static void settings_modal_close(void)
+{
+    if (s_modal_settings != NULL) {
+        lv_obj_t *m = s_modal_settings;
+        s_modal_settings = NULL;
+        s_lbl_fft_bin_hz = NULL;
+        s_lbl_span_val = NULL;
+        s_btn_fft_1024 = NULL;
+        s_btn_fft_2048 = NULL;
+        for (int i = 0; i < s_btn_span_n; i++) {
+            s_btn_span[i] = NULL;
+        }
+        s_btn_span_n = 0;
         lv_obj_delete_async(m);
     }
 }
@@ -567,6 +597,260 @@ static void step_item_cb(lv_event_t *e)
     modal_close();
 }
 
+/* ------------------------------------------------------------------ */
+/* Settings modal (FFT bin + LO start/stop span)                       */
+/* ------------------------------------------------------------------ */
+
+/* "11.72 Hz/bin @12 kHz" */
+static void fmt_hz_per_bin(char *out, size_t cap, uint16_t bins)
+{
+    const int fs = CONFIG_SDR_AUDIO_FS_HZ;
+    snprintf(out, cap, "%.2f Hz/bin @%d kHz",
+             (float)fs / (float)bins, fs / 1000);
+}
+
+/* "start-stop: +/-500 Hz" / "start-stop: +/-6K Hz (max)" */
+static void fmt_span_hz(char *out, size_t cap, int32_t eff_hz, bool clamped)
+{
+    const char *suffix = clamped ? " (max)" : "";
+    if (eff_hz >= 1000) {
+        snprintf(out, cap, "start-stop: +/-%ldK Hz%s",
+                 (long)(eff_hz / 1000), suffix);
+    } else {
+        snprintf(out, cap, "start-stop: +/-%ld Hz%s", (long)eff_hz, suffix);
+    }
+}
+
+static void fft_bin_cb(lv_event_t *e)
+{
+    const uint16_t bins = (uint16_t)(uintptr_t)lv_event_get_user_data(e);
+    sdr_config_set_fft_bins(bins);
+    if (s_btn_fft_1024 != NULL && s_btn_fft_2048 != NULL) {
+        lv_obj_clear_state(s_btn_fft_1024, LV_STATE_CHECKED);
+        lv_obj_clear_state(s_btn_fft_2048, LV_STATE_CHECKED);
+        lv_obj_add_state((bins == 1024) ? s_btn_fft_1024 : s_btn_fft_2048,
+                         LV_STATE_CHECKED);
+    }
+    if (s_lbl_fft_bin_hz != NULL) {
+        char buf[32];
+        fmt_hz_per_bin(buf, sizeof(buf), bins);
+        lv_label_set_text(s_lbl_fft_bin_hz, buf);
+    }
+    ui_scope_refresh();
+}
+
+static void span_cb(lv_event_t *e)
+{
+    const int32_t hz = (int32_t)(uintptr_t)lv_event_get_user_data(e);
+    sdr_config_set_span_half(hz);
+    for (int i = 0; i < s_btn_span_n; i++) {
+        if (s_btn_span[i] == NULL) {
+            continue;
+        }
+        if (s_btn_span_val[i] == hz) {
+            lv_obj_add_state(s_btn_span[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(s_btn_span[i], LV_STATE_CHECKED);
+        }
+    }
+    if (s_lbl_span_val != NULL) {
+        const int32_t eff = sdr_config_span_half_effective();
+        char buf[40];
+        fmt_span_hz(buf, sizeof(buf), eff, eff != hz);
+        lv_label_set_text(s_lbl_span_val, buf);
+    }
+    ui_scope_refresh();
+}
+
+static void settings_close_cb(lv_event_t *e)
+{
+    (void)e;
+    settings_modal_close();
+}
+
+static void settings_open_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_modal_settings != NULL) {
+        return;
+    }
+
+    lv_obj_t *scr = lv_screen_active();
+
+    s_modal_settings = lv_obj_create(scr);
+    lv_obj_set_size(s_modal_settings, 430, 232);
+    lv_obj_center(s_modal_settings);
+    lv_obj_set_style_bg_color(s_modal_settings, ui_col_modal(), 0);
+    lv_obj_set_style_bg_opa(s_modal_settings, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_modal_settings, 0, 0);
+    lv_obj_set_style_pad_all(s_modal_settings, 10, 0);
+    lv_obj_set_style_pad_row(s_modal_settings, 8, 0);
+    lv_obj_set_flex_flow(s_modal_settings, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scrollable(s_modal_settings, false);
+
+    /* Header: "Settings" + [X] */
+    lv_obj_t *hdr = lv_obj_create(s_modal_settings);
+    lv_obj_remove_style_all(hdr);
+    lv_obj_set_size(hdr, LV_PCT(100), 28);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *title = lv_label_create(hdr);
+    lv_label_set_text(title, "Settings");
+    lv_obj_set_style_text_color(title, ui_col_fg(), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+
+    lv_obj_t *btn_x = lv_button_create(hdr);
+    lv_obj_set_size(btn_x, 28, 28);
+    lv_obj_set_style_bg_color(btn_x, ui_col_btn(), 0);
+    lv_obj_set_style_bg_color(btn_x, ui_col_btn_press(), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn_x, 4, 0);
+    lv_obj_set_style_border_width(btn_x, 0, 0);
+    lv_obj_set_style_shadow_width(btn_x, 0, 0);
+    lv_obj_add_event_cb(btn_x, settings_close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *xlbl = lv_label_create(btn_x);
+    lv_label_set_text(xlbl, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_color(xlbl, ui_col_fg(), 0);
+    lv_obj_center(xlbl);
+
+    /* Row 1: FFT bin selector (1024 / 2048) + Hz/bin readout. */
+    lv_obj_t *row_fft = lv_obj_create(s_modal_settings);
+    lv_obj_remove_style_all(row_fft);
+    lv_obj_set_size(row_fft, LV_PCT(100), 32);
+    lv_obj_set_flex_flow(row_fft, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row_fft, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row_fft, 8, 0);
+
+    lv_obj_t *lfft = lv_label_create(row_fft);
+    lv_label_set_text(lfft, "FFT bin");
+    lv_obj_set_style_text_color(lfft, ui_col_fg(), 0);
+    lv_obj_set_style_text_font(lfft, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(lfft, 76);
+
+    lv_obj_t *b1024 = lv_button_create(row_fft);
+    lv_obj_set_size(b1024, 64, 30);
+    lv_obj_set_style_bg_color(b1024, ui_col_btn(), 0);
+    lv_obj_set_style_bg_color(b1024, ui_col_btn_press(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b1024, ui_col_btn_checked(), LV_STATE_CHECKED);
+    lv_obj_set_style_radius(b1024, 4, 0);
+    lv_obj_set_style_border_width(b1024, 0, 0);
+    lv_obj_set_style_shadow_width(b1024, 0, 0);
+    lv_obj_set_checkable(b1024, true);
+    lv_obj_add_event_cb(b1024, fft_bin_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)1024);
+    lv_obj_t *lb1024 = lv_label_create(b1024);
+    lv_label_set_text(lb1024, "1024");
+    lv_obj_set_style_text_color(lb1024, ui_col_fg(), 0);
+    lv_obj_center(lb1024);
+
+    lv_obj_t *b2048 = lv_button_create(row_fft);
+    lv_obj_set_size(b2048, 64, 30);
+    lv_obj_set_style_bg_color(b2048, ui_col_btn(), 0);
+    lv_obj_set_style_bg_color(b2048, ui_col_btn_press(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b2048, ui_col_btn_checked(), LV_STATE_CHECKED);
+    lv_obj_set_style_radius(b2048, 4, 0);
+    lv_obj_set_style_border_width(b2048, 0, 0);
+    lv_obj_set_style_shadow_width(b2048, 0, 0);
+    lv_obj_set_checkable(b2048, true);
+    lv_obj_add_event_cb(b2048, fft_bin_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)2048);
+    lv_obj_t *lb2048 = lv_label_create(b2048);
+    lv_label_set_text(lb2048, "2048");
+    lv_obj_set_style_text_color(lb2048, ui_col_fg(), 0);
+    lv_obj_center(lb2048);
+
+    s_lbl_fft_bin_hz = lv_label_create(row_fft);
+    lv_obj_set_style_text_color(s_lbl_fft_bin_hz, ui_col_dim(), 0);
+    lv_obj_set_style_text_font(s_lbl_fft_bin_hz, &lv_font_montserrat_14, 0);
+
+    const uint16_t bins = sdr_config_fft_bins_get();
+    s_btn_fft_1024 = b1024;
+    s_btn_fft_2048 = b2048;
+    if (bins == 1024) {
+        lv_obj_add_state(b1024, LV_STATE_CHECKED);
+    } else {
+        lv_obj_add_state(b2048, LV_STATE_CHECKED);
+    }
+    char fbh[32];
+    fmt_hz_per_bin(fbh, sizeof(fbh), bins);
+    lv_label_set_text(s_lbl_fft_bin_hz, fbh);
+
+    /* Row 2: label + LO start/stop span value. */
+    lv_obj_t *row_span_lbl = lv_obj_create(s_modal_settings);
+    lv_obj_remove_style_all(row_span_lbl);
+    lv_obj_set_size(row_span_lbl, LV_PCT(100), 22);
+    lv_obj_set_flex_flow(row_span_lbl, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row_span_lbl, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row_span_lbl, 8, 0);
+
+    lv_obj_t *lspan = lv_label_create(row_span_lbl);
+    lv_label_set_text(lspan, "LO span");
+    lv_obj_set_style_text_color(lspan, ui_col_fg(), 0);
+    lv_obj_set_style_text_font(lspan, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(lspan, 76);
+
+    s_lbl_span_val = lv_label_create(row_span_lbl);
+    lv_obj_set_style_text_color(s_lbl_span_val, ui_col_dim(), 0);
+    lv_obj_set_style_text_font(s_lbl_span_val, &lv_font_montserrat_14, 0);
+
+    const int32_t sh = sdr_config_span_half_get();
+    const int32_t sh_eff = sdr_config_span_half_effective();
+    char sv[40];
+    fmt_span_hz(sv, sizeof(sv), sh_eff, sh_eff != sh);
+    lv_label_set_text(s_lbl_span_val, sv);
+
+    /* Row 3: span options (250 Hz .. 10 kHz). */
+    lv_obj_t *row_span = lv_obj_create(s_modal_settings);
+    lv_obj_remove_style_all(row_span);
+    lv_obj_set_size(row_span, LV_PCT(100), 32);
+    lv_obj_set_flex_flow(row_span, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row_span, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row_span, 6, 0);
+
+    size_t sc = 0;
+    const int32_t *sopts = sdr_config_span_options(&sc);
+    s_btn_span_n = 0;
+    for (size_t i = 0; i < sc; i++) {
+        lv_obj_t *b = lv_button_create(row_span);
+        lv_obj_set_size(b, 58, 30);
+        lv_obj_set_style_bg_color(b, ui_col_btn(), 0);
+        lv_obj_set_style_bg_color(b, ui_col_btn_press(), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(b, ui_col_btn_checked(), LV_STATE_CHECKED);
+        lv_obj_set_style_radius(b, 4, 0);
+        lv_obj_set_style_border_width(b, 0, 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_set_checkable(b, true);
+        lv_obj_add_event_cb(b, span_cb, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)sopts[i]);
+        if (sopts[i] == sh) {
+            lv_obj_add_state(b, LV_STATE_CHECKED);
+        }
+        if (s_btn_span_n < UI_SPAN_BTN_MAX) {
+            s_btn_span[s_btn_span_n] = b;
+            s_btn_span_val[s_btn_span_n] = sopts[i];
+            s_btn_span_n++;
+        }
+        lv_obj_t *lb = lv_label_create(b);
+        char stxt[12];
+        if (sopts[i] >= 1000) {
+            snprintf(stxt, sizeof(stxt), "%ldK", (long)(sopts[i] / 1000));
+        } else {
+            snprintf(stxt, sizeof(stxt), "%ld", (long)sopts[i]);
+        }
+        lv_label_set_text(lb, stxt);
+        lv_obj_set_style_text_color(lb, ui_col_fg(), 0);
+        lv_obj_center(lb);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Step picker modal (10 Hz .. 1 MHz)                                  */
+/* ------------------------------------------------------------------ */
+
 static void step_open(void)
 {
     if (s_modal != NULL) {
@@ -876,6 +1160,21 @@ esp_err_t ui_init(void)
     lv_obj_set_style_text_color(s_label_vol_pct, ui_col_fg(), 0);
     lv_obj_set_style_text_font(s_label_vol_pct, &lv_font_montserrat_14, 0);
     lv_label_set_text(s_label_vol_pct, "0%");
+
+    /* Settings gear button (top bar kanan). */
+    lv_obj_t *btn_settings = lv_button_create(top);
+    lv_obj_set_size(btn_settings, 36, 36);
+    lv_obj_set_style_bg_color(btn_settings, ui_col_btn(), 0);
+    lv_obj_set_style_bg_color(btn_settings, ui_col_btn_press(), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn_settings, 6, 0);
+    lv_obj_set_style_border_width(btn_settings, 0, 0);
+    lv_obj_set_style_shadow_width(btn_settings, 0, 0);
+    lv_obj_add_event_cb(btn_settings, settings_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl_gear = lv_label_create(btn_settings);
+    lv_label_set_text(lbl_gear, LV_SYMBOL_SETTINGS);
+    lv_obj_set_style_text_color(lbl_gear, ui_col_fg(), 0);
+    lv_obj_set_style_text_font(lbl_gear, &lv_font_montserrat_16, 0);
+    lv_obj_center(lbl_gear);
 
     /* ---- F6: spectrum bar + waterfall (FR-6) ---- */
     if (ui_scope_init(scr) != ESP_OK) {

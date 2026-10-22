@@ -8,6 +8,8 @@
 
 #include <sdkconfig.h>
 
+#include <string.h>
+
 #include "freertos/FreeRTOS.h"
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -18,6 +20,11 @@ static const int32_t s_steps[] = {
     10, 50, 100, 500, 1000, 10000, 100000, 1000000,
 };
 #define SDR_STEP_COUNT (sizeof(s_steps) / sizeof(s_steps[0]))
+
+static const int32_t s_span_opts[] = {
+    250, 500, 1000, 2000, 5000, 10000,
+};
+#define SDR_SPAN_COUNT (sizeof(s_span_opts) / sizeof(s_span_opts[0]))
 
 void sdr_config_init(void)
 {
@@ -31,6 +38,8 @@ void sdr_config_init(void)
         .agc_target    = CONFIG_SDR_AGC_TARGET,
         .lo_i          = 0,
         .lo_q          = 0,
+        .fft_bins      = 2048,
+        .span_half_hz  = CONFIG_SDR_DISPLAY_SPAN_HZ,
     };
     portEXIT_CRITICAL(&s_lock);
 }
@@ -127,4 +136,62 @@ void sdr_config_set_agc_target(uint8_t target)
     portENTER_CRITICAL(&s_lock);
     s_cfg.agc_target = target;
     portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_fft_bins(uint16_t bins)
+{
+    if (bins != 1024 && bins != 2048) {
+        return;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.fft_bins = bins;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_span_half(int32_t hz)
+{
+    for (size_t i = 0; i < SDR_SPAN_COUNT; i++) {
+        if (s_span_opts[i] == hz) {
+            portENTER_CRITICAL(&s_lock);
+            s_cfg.span_half_hz = hz;
+            portEXIT_CRITICAL(&s_lock);
+            return;
+        }
+    }
+}
+
+const int32_t *sdr_config_span_options(size_t *count)
+{
+    *count = SDR_SPAN_COUNT;
+    return s_span_opts;
+}
+
+uint16_t sdr_config_fft_bins_get(void)
+{
+    uint16_t v;
+    portENTER_CRITICAL(&s_lock);
+    v = s_cfg.fft_bins;
+    portEXIT_CRITICAL(&s_lock);
+    return v;
+}
+
+int32_t sdr_config_span_half_get(void)
+{
+    int32_t v;
+    portENTER_CRITICAL(&s_lock);
+    v = s_cfg.span_half_hz;
+    portEXIT_CRITICAL(&s_lock);
+    return v;
+}
+
+int32_t sdr_config_span_half_effective(void)
+{
+    const int32_t lim = CONFIG_SDR_AUDIO_FS_HZ / 2;   /* Nyquist 12 kHz */
+    int32_t v = sdr_config_span_half_get();
+    if (v > lim) {
+        v = lim;
+    } else if (v < 1) {
+        v = 1;
+    }
+    return v;
 }

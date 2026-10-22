@@ -11,7 +11,14 @@
  *
  * Timer 30 ms (Core 0): spectrum_get_db() → ui_scope_push() →
  * invalidate bar + dorong satu baris waterfall. Frame boleh drop (NFR).
- * Drag horizontal pada waterfall mengubah nco_offset_hz (±3 kHz span).
+ * Drag horizontal pada waterfall mengubah nco_offset (§8).
+ *
+ * Skala tampilan RUNTIME (Settings modal):
+ *   - span (half-width ± Hz) dari sdr_config.span_half_hz, di-clamp ke
+ *     FS/2 (6 kHz @12 kHz) — lihat sdr_config_span_half_effective().
+ *   - lebar bin diturunkan dari jumlah bin keluaran (1024 atau 2048).
+ *   Grid vertikal & label Hz mengikuti span aktif; preset di atas FS/2
+ *   dijepit dan ditampilkan sebagai nilai efektif.
  */
 #include "ui/ui_scope.h"
 
@@ -25,6 +32,7 @@
 #include "spectrum.h"
 #include "ui/ui_colors.h"
 #include "ui/ui_main.h"
+
 
 /* Geometri area scope (480x320 landscape, top 52 / bottom 56).
  * Objek chart mentok kiri-x2=0 dan x479. Strip sumbu: kiri 30 px
@@ -60,10 +68,17 @@ static lv_timer_t *s_timer;
 static uint8_t *s_wf_buf;
 static int s_wf_rows;
 
-/* Hasil spektrum terakhir (untuk redraw LVGL saat invalidasi). */
-static float s_db[CONFIG_SDR_FFT_N];
+/* Hasil spektrum terakhir (untuk redraw LVGL saat invalidasi).
+ * Band penuh terpusat DC (index tengah = DC); jumlah bin runtime
+ * 1024 atau 2048 (mode FFT dari Settings). */
+static float s_db[SPECTRUM_MAX_OUT_NBINS];
 static int s_nbins;
 static float s_db_min = SCOPE_DB_MIN_FLOOR; /* dasar chart dinamis (state) */
+
+/* Skala runtime: half-span efektif (± Hz) & lebar bin (Hz). */
+static int32_t s_span_hz = CONFIG_SDR_DISPLAY_SPAN_HZ;
+static float s_bin_hz = (float)CONFIG_SDR_AUDIO_FS_HZ /
+                        (float)SPECTRUM_MAX_OUT_NBINS;
 
 /* Line chart (F6): titik per piksel + marker puncak merah + chip freq. */
 static lv_point_precise_t s_chart_pts[SCOPE_W];
@@ -102,20 +117,49 @@ static float db_frac(float db)
     return f;
 }
 
-/* Rentang bin untuk kolom piksel x: zoom ke ±SDR_DISPLAY_SPAN_HZ —
- * ~1 bin/piksel (1024 bin → 168 bin untuk ±500 Hz di 422 px), sehingga
- * tidak ada bin yang dilewati (bukan point-sampling/interpolasi). */
+/* Half-span efektif saat ini (± Hz, sudah di-clamp ke FS/2). */
+static int32_t scope_span_hz(void)
+{
+    return s_span_hz;
+}
+
+/* Sinkronkan span efektif dengan sdr_config (Settings modal). */
+static void scope_scale_update(void)
+{
+    const int32_t s = sdr_config_span_half_effective();
+    if (s > 0) {
+        s_span_hz = s;
+    }
+}
+
+/* Grid vertikal: {-S, -S/2, 0, +S/2, +S} dengan S = span efektif. */
+static void scope_hz_marks(int32_t *out)
+{
+    const int32_t s = scope_span_hz();
+    out[0] = -s;
+    out[1] = -(s / 2);
+    out[2] = 0;
+    out[3] = s / 2;
+    out[4] = s;
+}
+
+/* Rentang bin untuk kolom piksel x: zoom ke ±span efektif.
+ * Lebar bin = s_bin_hz (runtime) — tiap piksel mengambil maksimum bin
+ * dalam rentangnya (bukan interpolasi). Pembulatan memakai floorf agar
+ * tidak ada bin yang terlewat di sekitar DC (truncasi ke nol melompati
+ * bin pada sisi kiri). */
 static void scope_bin_range(int x, int nbins, int *k0, int *k1)
 {
     const int center = nbins / 2;
-    const int half_px = SCOPE_W / 2;
-    const int span = (int)((float)CONFIG_SDR_DISPLAY_SPAN_HZ *
-                           (float)nbins / (float)CONFIG_SDR_AUDIO_FS_HZ);
+    const float half_px = (float)(SCOPE_W / 2);
+    const float span = (float)scope_span_hz() / s_bin_hz;
 
-    int a = center + (int)(((float)x - (float)half_px + 0.5f) *
-                           (float)span / (float)half_px);
-    int b = center + (int)(((float)x - (float)half_px + 1.5f) *
-                           (float)span / (float)half_px);
+    const float fa = (float)center +
+                     (((float)x - half_px + 0.5f) * span / half_px);
+    const float fb = (float)center +
+                     (((float)x - half_px + 1.5f) * span / half_px);
+    int a = (int)floorf(fa);
+    int b = (int)floorf(fb);
     if (b <= a) {
         b = a + 1;
     }
@@ -125,8 +169,9 @@ static void scope_bin_range(int x, int nbins, int *k0, int *k1)
     if (b > nbins) {
         b = nbins;
     }
-    if (a >= b) {
-        a = b - 1;
+    if (b <= a) {
+        a = nbins - 1;                /* di luar array → bin terakhir */
+        b = nbins;
     }
     *k0 = a;
     *k1 = b;
@@ -141,11 +186,14 @@ static void wf_bin_range(int sx, int nbins, int *k0, int *k1)
 {
     const int center = nbins / 2;
     const float half_px = (float)(SCOPE_W / 2);
-    const float span = (float)CONFIG_SDR_DISPLAY_SPAN_HZ *
-                       (float)nbins / (float)CONFIG_SDR_AUDIO_FS_HZ;
+    const float span = (float)scope_span_hz() / s_bin_hz;
 
-    int a = center + (int)(((float)(sx - WF_CX) + 0.5f) * span / half_px);
-    int b = center + (int)(((float)(sx - WF_CX) + 1.5f) * span / half_px);
+    const float fa = (float)center +
+                     (((float)(sx - WF_CX) + 0.5f) * span / half_px);
+    const float fb = (float)center +
+                     (((float)(sx - WF_CX) + 1.5f) * span / half_px);
+    int a = (int)floorf(fa);
+    int b = (int)floorf(fb);
     if (b <= a) {
         b = a + 1;
     }
@@ -155,8 +203,9 @@ static void wf_bin_range(int sx, int nbins, int *k0, int *k1)
     if (b > nbins) {
         b = nbins;
     }
-    if (a >= b) {
-        a = b - 1;
+    if (b <= a) {
+        a = nbins - 1;
+        b = nbins;
     }
     *k0 = a;
     *k1 = b;
@@ -176,40 +225,34 @@ static float wf_val(const float *db, int sx, int nbins)
     return v;
 }
 
-/* Nilai tampilan kolom x dgn interpolasi linear antar bin (dipakai line
- * chart). Saat zoom, 1 bin FFT (~46.9 Hz) melebar ~21 px; tanpa interpolasi
- * nilainya konstan sepanjang itu → chart tampak "stepped". Interpolasi
- * di koordinat bin kontinu membuat kurva tersambung mulus. */
-static float scope_val_lerp(const float *db, int x, int nbins)
-{
-    const int center = nbins / 2;
-    const int half_px = SCOPE_W / 2;
-    const float span = (float)CONFIG_SDR_DISPLAY_SPAN_HZ *
-                       (float)nbins / (float)CONFIG_SDR_AUDIO_FS_HZ;
-
-    const float bf = (float)center + ((float)x - (float)half_px + 0.5f) *
-                     span / (float)half_px;
-    int i0 = (int)floorf(bf);
-    float t = bf - (float)i0;
-    if (i0 < 0) {
-        i0 = 0;
-        t = 0.0f;
-    } else if (i0 > nbins - 2) {
-        i0 = nbins - 2;
-        t = 1.0f;
-    }
-    const float v0 = db[i0];
-    const float v1 = db[i0 + 1];
-    return v0 + (v1 - v0) * t;
-}
-
 /* Frekuensi (Hz, relatif DC) → x piksel (kebalikan scope_bin_range). */
 static int32_t freq_to_x(int32_t hz)
 {
     const float half_px = (float)(SCOPE_W / 2);
     const float x = half_px - 0.5f +
-                    (float)hz * half_px / (float)CONFIG_SDR_DISPLAY_SPAN_HZ;
-    return (int32_t)lroundf(x);
+                    (float)hz * half_px / (float)scope_span_hz();
+    int32_t xi = (int32_t)lroundf(x);
+    if (xi < 0) {
+        xi = 0;
+    } else if (xi > SCOPE_W - 1) {
+        xi = SCOPE_W - 1;
+    }
+    return xi;
+}
+
+/* "20.00000 M" — MHz 5 desimal (resolusi 10 Hz) dengan pembulatan. */
+static void fmt_mhz(char *out, size_t cap, int32_t hz)
+{
+    if (hz < 0) {
+        hz = 0;
+    }
+    uint32_t mhz = (uint32_t)hz / 1000000u;
+    uint32_t frac = ((uint32_t)hz % 1000000u + 5u) / 10u;
+    if (frac >= 100000u) {
+        frac = 0u;
+        mhz += 1u;
+    }
+    snprintf(out, cap, "%u.%05u M", (unsigned)mhz, (unsigned)frac);
 }
 
 /* Persegi plot di dalam s_bar_obj: objek mencakup plot + strip label
@@ -262,7 +305,8 @@ static void draw_grid(lv_layer_t *layer, const plot_rect_t *pr)
         db_marks[2] = (int)lroundf(hi);
         n_marks = 3;
     }
-    static const int32_t hz_marks[] = {-500, -250, 0, 250, 500};
+    int32_t hz_marks[5];
+    scope_hz_marks(hz_marks);
     lv_point_precise_t pts[2];
 
     lv_draw_line_dsc_t ld;
@@ -305,7 +349,8 @@ static void draw_grid(lv_layer_t *layer, const plot_rect_t *pr)
 static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
                               const lv_area_t *obj)
 {
-    const int32_t hz_marks[] = {-500, -250, 0, 250, 500};
+    int32_t hz_marks[5];
+    scope_hz_marks(hz_marks);
     /* Grid dBFS dinamis — sama persis dengan logika di draw_grid(). */
     const float lo = s_db_min;
     const float hi = SCOPE_DB_MAX;
@@ -335,17 +380,12 @@ static void draw_scale_labels(lv_layer_t *layer, const plot_rect_t *pr,
     static char x_text[5][16];
     static char y_text[16][8];
 
-    /* X axis = LO + nco_offset + offset grid, MHz 3 desimal (1 kHz/tick). */
+    /* X axis = LO + nco_offset + offset grid, MHz 5 desimal (1 kHz/tick). */
     sdr_config_t cfg;
     sdr_config_get(&cfg);
     for (size_t i = 0; i < 5; i++) {
-        int32_t hz = cfg.lo_label_hz + cfg.nco_offset_hz + hz_marks[i];
-        if (hz < 0) {
-            hz = 0;
-        }
-        /* 5 desimal MHz (resolusi 10 Hz) agar tick 500 Hz terbaca. */
-        snprintf(x_text[i], sizeof(x_text[i]), "%u.%05u M",
-                 (unsigned)(hz / 1000000), (unsigned)((hz % 1000000) / 10));
+        const int32_t hz = cfg.lo_label_hz + cfg.nco_offset_hz + hz_marks[i];
+        fmt_mhz(x_text[i], sizeof(x_text[i]), hz);
     }
 
     /* Y axis label = dBFS aktual (dasar dinamis, 0 dBFS = full-scale I/Q). */
@@ -447,21 +487,77 @@ static void bar_draw_cb(lv_event_t *e)
 
     draw_grid(layer, &pr);
 
-    /* Line chart biru muda, satu draw task (polyline SCOPE_W titik). */
+    /* Line chart kuning pucat: SATU titik per bin FFT (nilai asli, TANPA
+     * interpolasi) pada posisi frekuensi binnya. Bila bin dalam tampilan
+     * melebihi jumlah piksel, digambar envelope maksimum per piksel
+     * (gaya SDR klasik) supaya puncak tidak hilang. */
     lv_draw_line_dsc_t dsc;
     lv_draw_line_dsc_init(&dsc);
     dsc.color = ui_col_scope_line();
     dsc.width = 1;
     dsc.opa = LV_OPA_COVER;
     dsc.points = s_chart_pts;
-    dsc.point_cnt = SCOPE_W;
+    dsc.point_cnt = 0;
 
-    for (int x = 0; x < SCOPE_W; x++) {
-        const float f = db_frac(scope_val_lerp(s_db, x, s_nbins));
-        s_chart_pts[x].x = (lv_value_precise_t)(pr.x1 + x);
-        s_chart_pts[x].y =
-            (lv_value_precise_t)(pr.y2 - (int32_t)(f * (float)(pr.h - 1)));
+    const int center = s_nbins / 2;
+    const float half_px = (float)(SCOPE_W / 2);
+    const float span_bins = (float)scope_span_hz() / s_bin_hz;
+    int k0 = center - (int)ceilf(span_bins) - 1;
+    int k1 = center + (int)ceilf(span_bins) + 1;
+    if (k0 < 0) {
+        k0 = 0;
     }
+    if (k1 > s_nbins - 1) {
+        k1 = s_nbins - 1;
+    }
+    int npts = 0;
+    if (k1 - k0 + 1 <= SCOPE_W) {
+        /* Titik per bin asli: bin yang jatuh pada piksel sama diambil
+         * yang paling tinggi (hindari zigzag saat bin > piksel). */
+        int last_x = -1;
+        float last_db = -1.0e9f;
+        for (int k = k0; k <= k1; k++) {
+            const float hz = ((float)k - (float)center) * s_bin_hz;
+            const int32_t x = (int32_t)lroundf(
+                half_px - 0.5f + hz * half_px / (float)scope_span_hz());
+            if (x < 0 || x >= SCOPE_W) {
+                continue;                           /* di luar plot ±span      */
+            }
+            const float f = db_frac(s_db[k]);
+            if (x == last_x && npts > 0) {
+                if (s_db[k] > last_db) {
+                    s_chart_pts[npts - 1].y = (lv_value_precise_t)(
+                        pr.y2 - (int32_t)(f * (float)(pr.h - 1)));
+                    last_db = s_db[k];
+                }
+                continue;
+            }
+            s_chart_pts[npts].x = (lv_value_precise_t)(pr.x1 + x);
+            s_chart_pts[npts].y =
+                (lv_value_precise_t)(pr.y2 - (int32_t)(f * (float)(pr.h - 1)));
+            npts++;
+            last_x = x;
+            last_db = s_db[k];
+        }
+    } else {
+        /* Terlalu banyak bin untuk satu titik/piksel → envelope max. */
+        for (int x = 0; x < SCOPE_W; x++) {
+            int a, b;
+            scope_bin_range(x, s_nbins, &a, &b);
+            float v = s_db[a];
+            for (int k = a + 1; k < b; k++) {
+                if (s_db[k] > v) {
+                    v = s_db[k];
+                }
+            }
+            const float f = db_frac(v);
+            s_chart_pts[npts].x = (lv_value_precise_t)(pr.x1 + x);
+            s_chart_pts[npts].y =
+                (lv_value_precise_t)(pr.y2 - (int32_t)(f * (float)(pr.h - 1)));
+            npts++;
+        }
+    }
+    dsc.point_cnt = npts;
     lv_draw_line(layer, &dsc);
 
     /* Marker vertikal merah di puncak (dalam plot). */
@@ -546,7 +642,7 @@ static void wf_drag_cb(lv_event_t *e)
         s_drag_x0 = x;
     } else if (code == LV_EVENT_PRESSING && s_dragging) {
         const float hz_per_px =
-            (2.0f * (float)CONFIG_SDR_DISPLAY_SPAN_HZ) / (float)SCOPE_W;
+            (2.0f * (float)scope_span_hz()) / (float)SCOPE_W;
         /* Geser kanan → offset turun (spektrum bergeser kanan). */
         const int32_t delta =
             (int32_t)((float)(s_drag_x0 - x) * hz_per_px);
@@ -608,14 +704,12 @@ static void update_peak(const float *db, int nbins)
             }
         }
     }
-    /* Posisi marker = piksel puncak VISUAL garis lerp (bf = best_bin),
-     * bukan piksel pertama yang mencakup bin puncak. Lerp peak ada di
-     * bf = best_bin; piksel pertama cakupan bin bisa ~21 px di kiri apex. */
+    /* Posisi marker = piksel puncak bin (frekuensi best_bin dipetakan ke x),
+     * sejajar titik chart utk bin tersebut. */
     {
         const int center = nbins / 2;
         const float half_px = (float)(SCOPE_W / 2);
-        const float span = (float)CONFIG_SDR_DISPLAY_SPAN_HZ * (float)nbins /
-                           (float)CONFIG_SDR_AUDIO_FS_HZ;
+        const float span = (float)scope_span_hz() / s_bin_hz;
         float xf = half_px - 0.5f +
                    ((float)best_bin - (float)center) * half_px / span;
         int bx = (int)lroundf(xf);
@@ -659,9 +753,8 @@ static void update_peak(const float *db, int nbins)
     /* Frekuensi absolut = LO label + offset NCO + offset bin (DC = tuned). */
     sdr_config_t cfg;
     sdr_config_get(&cfg);
-    const float bin_hz = (float)CONFIG_SDR_AUDIO_FS_HZ / (float)nbins;
     const int32_t off_hz =
-        (int32_t)((float)(best_bin - nbins / 2) * bin_hz);
+        (int32_t)((float)(best_bin - nbins / 2) * s_bin_hz);
     char txt[32];
     fmt_peak(txt, sizeof(txt), cfg.lo_label_hz + cfg.nco_offset_hz + off_hz,
              best);
@@ -701,8 +794,29 @@ static void scope_timer_cb(lv_timer_t *timer)
 
 void ui_scope_push(const float *db, int nbins)
 {
+    if (nbins > 0) {
+        /* Lebar bin runtime mengikuti jumlah bin keluaran (1024/2048). */
+        s_bin_hz = (float)CONFIG_SDR_AUDIO_FS_HZ / (float)nbins;
+    }
+    scope_scale_update();
     update_peak(db, nbins);
     wf_push_row(db, nbins);
+    if (s_bar_obj != NULL) {
+        lv_obj_invalidate(s_bar_obj);
+    }
+}
+
+void ui_scope_refresh(void)
+{
+    scope_scale_update();
+    /* Bersihkan waterfall: baris lama memakai skala span/FFT sebelumnya. */
+    if (s_wf_buf != NULL && s_wf_rows > 0) {
+        memset(s_wf_buf, 0,
+               (size_t)WF_W * (size_t)s_wf_rows * sizeof(uint16_t));
+        if (s_canvas != NULL) {
+            lv_obj_invalidate(s_canvas);
+        }
+    }
     if (s_bar_obj != NULL) {
         lv_obj_invalidate(s_bar_obj);
     }

@@ -29,6 +29,8 @@ typedef struct {
     uint8_t volume_pct;     /* 0..100                                      */
     uint8_t agc_target;     /* AGC target level (used from F5)             */
     int16_t lo_i, lo_q;     /* I/Q calibration slots (reserved, future)    */
+    uint16_t fft_bins;      /* 1024 / 2048                                */
+    int32_t span_half_hz;   /* ± Hz dari LO: 250/500/1000/2000/5000/10000 */
 } sdr_config_t;
 
 /** Load defaults from Kconfig. Call once from app_main before ui_init(). */
@@ -48,6 +50,20 @@ void sdr_config_toggle_mode(void);
 void sdr_config_set_volume(uint8_t pct);     /* clamped 0..100            */
 void sdr_config_add_volume(int8_t delta_pct);
 void sdr_config_set_agc_target(uint8_t target);
+void sdr_config_set_fft_bins(uint16_t bins);
+void sdr_config_set_span_half(int32_t hz);
+const int32_t *sdr_config_span_options(size_t *count);
+uint16_t sdr_config_fft_bins_get(void);
+int32_t sdr_config_span_half_get(void);
+
+/**
+ * @brief Half-span efektif (Hz) yang benar-benar dapat ditampilkan.
+ *
+ * Nilai preset (sdr_config_span_half_get) di-clamp ke FS/2 karena sampler
+ * 12 kHz hanyacovers +/-6 kHz sekitar DC. Preset 10 kHz tetap terpilih di
+ * UI, namun readout & plot memakai nilai efektif hasil fungsi ini.
+ */
+int32_t sdr_config_span_half_effective(void);
 
 #ifdef __cplusplus
 }

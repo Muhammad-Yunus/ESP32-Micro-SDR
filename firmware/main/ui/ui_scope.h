@@ -27,8 +27,22 @@ esp_err_t ui_scope_init(lv_obj_t *parent);
 /**
  * @brief Menerima satu frame spektrum (dB, urutan display) untuk render.
  *
- * `db` berisi `nbins` nilai dB dengan index tengah = DC; line chart
- * menampilkan zoom ±SDR_DISPLAY_SPAN_HZ (~1 bin/piksel), marker merah +
- * chip menandai puncak, dan satu baris waterfall didorong ke bawah.
+ * `db` berisi `nbins` nilai dB band penuh terpusat DC (index tengah = DC,
+ * index 0 = tepi kiri -FS/2); jumlah bin runtime 1024 atau 2048 mengikuti
+ * mode FFT dari Settings modal. Lebar bin = CONFIG_SDR_AUDIO_FS_HZ/nbins,
+ * tampilan di-zoom ke ±span efektif (sdr_config.span_half_hz, dijepit ke
+ * FS/2); line chart menampilkan titik per bin asli tanpa interpolasi
+ * (atau envelope max per piksel bila bin melebihi piksel), marker merah +
+ * segitiga kuning + chip menandai puncak, dan satu baris waterfall
+ * didorong ke bawah.
  */
 void ui_scope_push(const float *db, int nbins);
+
+/**
+ * @brief Terapkan ulang skala runtime (span/FFT bin) dan bersihkan waterfall.
+ *
+ * Dipanggil setelah Settings modal mengubah span atau jumlah bin FFT:
+ * baris waterfall lama memakai skala berbeda sehingga dihapus, dan chart
+ * digambar ulang dengan skala baru.
+ */
+void ui_scope_refresh(void);

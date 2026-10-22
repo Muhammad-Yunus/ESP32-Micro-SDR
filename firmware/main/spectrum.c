@@ -7,7 +7,8 @@
  *   Core 1: dsp_chain mengakumulasi 1024 frame pasca-NCO @12 kHz
  *           → spectrum_ingest() menyalin ke slot pool (drop-LAMA).
  *   Core 0: timer UI memanggil spectrum_get_db() → drain slot terbaru →
- *           Hann window → FFT kompleks 1024 → magnitude → dB → display.
+ *           Hann window 1024 → zero-pad 2048 → FFT kompleks → magnitude →
+ *           dB band penuh terpusat DC → display.
  *
  * Input I/Q kompleks: TIDAK memakai dsps_cplx2reC (itu untuk trik FFT
  * data real); magnitude per bin dihitung langsung dari interleaved.
@@ -25,18 +26,23 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "sdkconfig.h"
+#include "sdr_config.h"
 
 static const char *TAG = "spectrum";
 
-#define SP_N        CONFIG_SDR_FFT_N          /* 1024 titik               */
+#define SP_N        CONFIG_SDR_FFT_N          /* jendela/capture 1024     */
+#define SP_FFT_N    SPECTRUM_FFT_N            /* zero-pad FFT 2048        */
+#define SP_MAX_OUT  SPECTRUM_MAX_OUT_NBINS   /* keluaran maks 2048 bin   */
 #define SP_POOL     3                         /* slot snapshot (§4)       */
 /* Floor log: bin sunyi (re²+im²=0) membaca ≈ 10·log10(SP_EPS) − SP_FS_REFS
  * ≈ −150 dBFS, jauh di bawah noise floor riil (~−110 dBFS). Nilai lebih
  * dalam adalah artifact log, bukan sinyal. */
 #define SP_EPS      2.6e-10f
+
 
 /* Referensi full-scale: tone I/Q = ±1.0 (ADC penuh pasca-NCO). */
 #define SP_FS_REFS   (20.0f * log10f((2.0f * (float)SP_N) / 4.0f))
@@ -49,21 +55,20 @@ static iq_t *s_pool[SP_POOL];
 /* Buffer FFT (interleaved 2×N float, aligned 16 untuk assembly esp-dsp). */
 static float *s_fft;
 
-/* LUT Hann + hasil dB (display order, index tengah = DC). */
+/* LUT Hann (jendela window 1024 titik). */
 static float s_hann[SP_N];
-static float s_db[SP_N];
 
 esp_err_t spectrum_init(void)
 {
-    ESP_RETURN_ON_FALSE(dsps_fft2r_init_fc32(NULL, SP_N) == ESP_OK,
-                        ESP_FAIL, TAG, "dsps_fft2r_init_fc32(%d) gagal", SP_N);
+    ESP_RETURN_ON_FALSE(dsps_fft2r_init_fc32(NULL, SP_FFT_N) == ESP_OK,
+                        ESP_FAIL, TAG, "dsps_fft2r_init_fc32(%d) gagal", SP_FFT_N);
 
     dsps_wind_hann_f32(s_hann, SP_N);
 
-    s_fft = heap_caps_aligned_alloc(16, 2 * SP_N * sizeof(float),
+    s_fft = heap_caps_aligned_alloc(16, 2 * SP_FFT_N * sizeof(float),
                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     ESP_RETURN_ON_FALSE(s_fft != NULL, ESP_ERR_NO_MEM, TAG,
-                        "buffer FFT %u byte gagal", (unsigned)(2 * SP_N * sizeof(float)));
+                        "buffer FFT %u byte gagal", (unsigned)(2 * SP_FFT_N * sizeof(float)));
 
     s_free_q = xQueueCreate(SP_POOL, sizeof(iq_t *));
     s_snap_q = xQueueCreate(SP_POOL, sizeof(iq_t *));
@@ -79,10 +84,14 @@ esp_err_t spectrum_init(void)
     }
 
     ESP_LOGI(TAG,
-             "F6: FFT %d (%.1f Hz/bin @%d Hz) | pool %d x %d frame | span +/-%d Hz",
-             SP_N, (float)CONFIG_SDR_AUDIO_FS_HZ / (float)SP_N,
-             CONFIG_SDR_AUDIO_FS_HZ, SP_POOL, SP_N,
-             CONFIG_SDR_DISPLAY_SPAN_HZ);
+             "F6: window %d zero-pad FFT %d (%.2f Hz/bin @%d Hz) | "
+             "keluaran %d/%d bin (runtime) | pool %d x %d frame | "
+             "span +/-%ld Hz | free heap %u",
+             SP_N, SP_FFT_N,
+             (float)CONFIG_SDR_AUDIO_FS_HZ / (float)SP_FFT_N,
+             CONFIG_SDR_AUDIO_FS_HZ, SP_MAX_OUT, SP_MAX_OUT, SP_POOL, SP_N,
+             (long)sdr_config_span_half_effective(),
+             (unsigned)esp_get_free_heap_size());
     return ESP_OK;
 }
 
@@ -122,25 +131,46 @@ bool spectrum_get_db(float *out_db, int *out_nbins)
         return false;                           /* belum ada frame baru    */
     }
 
-    /* Hann window: salin interleaved + window per kanal. */
+    /* Hann window pada jendela 1024 sampel, sisanya nol (zero-pad). */
     for (int k = 0; k < SP_N; k++) {
         s_fft[2 * k]     = slot->i * s_hann[k];
         s_fft[2 * k + 1] = slot->q * s_hann[k];
     }
+    memset(&s_fft[2 * SP_N], 0,
+           2 * (SP_FFT_N - SP_N) * sizeof(float));
     xQueueSend(s_free_q, &slot, 0);             /* kembalikan slot pool    */
 
-    dsps_fft2r_fc32(s_fft, SP_N);
-    dsps_bit_rev_fc32(s_fft, SP_N);
+    dsps_fft2r_fc32(s_fft, SP_FFT_N);
+    dsps_bit_rev_fc32(s_fft, SP_FFT_N);
 
-    /* dBFS per bin dalam urutan display: j=0 → bin −N/2, j=N/2 → DC.
-     * 0 dBFS = tone full-scale I/Q ±1.0. */
-    for (int j = 0; j < SP_N; j++) {
-        const int k = (j < SP_N / 2) ? (j + SP_N / 2) : (j - SP_N / 2);
+    /* Band penuh terpusat DC (urutan display: frekuensi naik; index
+     * out_n/2 = DC = tuned, index 0 = tepi kiri -FS/2).
+     *
+     * Jumlah bin mengikuti mode runtime sdr_config.fft_bins:
+     *   out_n = 2048 → stride 1 → bin FFT natural k (5,86 Hz/bin)
+     *   out_n = 1024 → stride 2 → bin FFT natural 2m (11,72 Hz/bin)
+     * Karena DFT-1024 dari jendela yang sama == bin genap DFT-2048
+     * zero-pad (X_2048[2m] == X_1024[m], magnitudo identik), mode 1024
+     * cukup decimasi keluaran — tabel esp-dsp & pool tetap sama.
+     *
+     * Skala dBFS tetap (SP_FS_REFS dari panjang jendela 1024; zero-pad
+     * tidak mengubah magnitudo DTFT tone penuh-skala → 0 dB). */
+    uint16_t bins = sdr_config_fft_bins_get();
+    if (bins != 1024 && bins != 2048) {
+        bins = 2048;
+    }
+    const int out_n = (int)bins;
+    const int stride = SP_FFT_N / out_n;         /* 1 atau 2             */
+    const int center = out_n / 2;
+
+    for (int j = 0; j < out_n; j++) {
+        const int m = (j + center) & (out_n - 1);   /* indeks DFT out_n  */
+        const int k = (stride * m) & (SP_FFT_N - 1);/* indeks FFT natural*/
         const float re = s_fft[2 * k];
         const float im = s_fft[2 * k + 1];
         out_db[j] = 10.0f * log10f(re * re + im * im + SP_EPS) - SP_FS_REFS;
     }
 
-    *out_nbins = SP_N;
+    *out_nbins = out_n;
     return true;
 }

@@ -1,13 +1,20 @@
 /*
  * SPDX-License-Identifier: MIT
  *
- * spectrum — FFT esp-dsp 1024 titik pada stream I/Q pasca-NCO @12 kHz
+ * spectrum — FFT esp-dsp 2048 titik pada stream I/Q pasca-NCO @12 kHz
  * (FR-6, docs/ARCHITECTURE.md §3/§5).
  *
  * Core 1 (dsp_chain) menyalin snapshot 1024 frame dan memanggil
  * spectrum_ingest(); Core 0 (timer UI) memanggil spectrum_get_db() yang
- * menerapkan jendela Hann, FFT, dan mengubah ke dB — urutan display:
- * index 0 = −fs/2, center = DC, index N−1 = +fs/2−bin.
+ * menerapkan jendela Hann, zero-pad ke SPECTRUM_FFT_N, FFT, dan mengubah
+ * ke dB.
+ *
+ * Zero-pad menambah kepadatan sampel frekuensi tampilan (5,86 Hz/bin
+ * @12 kHz untuk N=2048); resolusi spektrum asli (RBW Hann) tetap
+ * 1024-titik (~11,7 Hz). Keluaran = band penuh terpusat DC: jumlah bin
+ * mengikuti mode runtime (sdr_config.fft_bins = 1024 atau 2048), index
+ * tengah = DC, index 0 = tepi kiri (-FS/2), urutan display frekuensi naik.
+ * Line chart memakai nilai bin asli TANPA interpolasi.
  */
 #pragma once
 
@@ -15,7 +22,15 @@
 
 #include "esp_err.h"
 
+#include "sdkconfig.h"
+
 #include "rx_adc.h"
+
+/** NFFT zero-pad: pangkat 2, >= CONFIG_SDR_FFT_N, <= CONFIG_DSP_MAX_FFT_SIZE. */
+#define SPECTRUM_FFT_N     2048
+
+/** Jumlah bin keluaran maksimum (mode 2048 = band penuh +/-FS/2). */
+#define SPECTRUM_MAX_OUT_NBINS 2048
 
 /**
  * @brief Inisialisasi pool snapshot, LUT Hann, dan tabel FFT esp-dsp.
@@ -37,10 +52,14 @@ void spectrum_ingest(const iq_t *snapshot1024);
 /**
  * @brief Mengambil hasil spektrum terbaru dalam urutan display (Core 0).
  *
- * Mengonversi snapshot terbaru → Hann → FFT → dB. `out_db` diisi
- * `*out_nbins` (= CONFIG_SDR_FFT_N) nilai dB: index 0 = −fs/2,
- * index N/2 = DC (frekuensi tuning), index N−1 = +fs/2−bin.
+ * Mengonversi snapshot terbaru → Hann → zero-pad SPECTRUM_FFT_N → FFT →
+ * dB. `out_db` diisi `*out_nbins` nilai dB band penuh terpusat DC:
+ * index 0 = tepi kiri (-FS/2), index `*out_nbins`/2 = DC (frekuensi
+ * tuning). Jumlah bin = mode runtime sdr_config.fft_bins (1024 atau
+ * 2048); lebar bin = CONFIG_SDR_AUDIO_FS_HZ / jumlah bin.
  *
+ * @param out_db buffer dB (kapasitas SPECTRUM_MAX_OUT_NBINS float).
+ * @param out_nbins diisi jumlah bin efektif yang dihasilkan.
  * @return true bila ada frame baru; false bila tidak ada (UI skip render).
  */
 bool spectrum_get_db(float *out_db, int *out_nbins);

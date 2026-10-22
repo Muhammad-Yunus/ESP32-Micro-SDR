@@ -14,11 +14,12 @@ config SDR_FFT_N
         Spectrum FFT length at the decimated 12 kHz IQ stream.
 
 config SDR_DISPLAY_SPAN_HZ
-    int "Display span (+/- Hz)"
+    int "Default display span (+/- Hz)"
     default 500
     help
-        Half-width of the spectrum/waterfall display around the tuned
-        frequency.
+        Initial half-width of the spectrum/waterfall display around the
+        tuned frequency. At runtime the span is changed from the Settings
+        modal (250/500/1k/2k/5k/10k Hz) and clamped to FS/2.
 
 config SDR_BFO_HZ
     int "BFO frequency (Hz)"
