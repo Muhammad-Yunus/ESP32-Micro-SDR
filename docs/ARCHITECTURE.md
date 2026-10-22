@@ -305,6 +305,9 @@ sedangkan area plot chart 442 px (x30..471) + padding kanan 8 px.
 
 - Waterfall: `lv_canvas` RGB565 480×64 (≈ 60 KB); update = `memmove` turun
   satu baris + gambar baris baru + invalidate. Fallback RAM: 44 baris (41 KB).
+  Catatan geometri: kanvas mulai `WF_Y=204` dan setinggi 64 baris (sampai
+  y=267), sedangkan bottom bar mulai y=264 → **4 baris paling bawah kanvas
+  tertutup bottom bar**; area waterfall yang terlihat = 60 baris.
 - Spektrum: line chart kuning pucat 1 px digambar pada event
   `LV_EVENT_DRAW_MAIN` (polyline ≤ 442 titik, tanpa buffer penuh) — **satu
   titik per bin FFT**: nilai asli tanpa interpolasi, x = posisi frekuensi
