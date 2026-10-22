@@ -94,9 +94,13 @@ config SDR_NCO_LIMIT_HZ
 config SDR_DEFAULT_VOLUME_PCT
     int "Default volume (%)"
     range 0 100
-    default 50
+    default 0
     help
         Initial audio volume percentage.
+
+        Default is 0 (mute) so the speaker stays silent until the user
+        raises the volume from the bottom bar (Vol+ / Vol-). Set it back
+        to 50 for a louder default.
 
 config SDR_AUDIO_FS_HZ
     int "Audio output sample rate (Hz)"

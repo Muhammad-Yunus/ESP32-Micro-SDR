@@ -157,6 +157,7 @@ CONFIG_SDR_AUDIO_FS_HZ=12000                 # FS post-decimasi → batas span �
 CONFIG_SDR_DISPLAY_SPAN_HZ=500               # span awal, dapat diubah saat runtime
 CONFIG_SDR_BFO_HZ=1500
 CONFIG_SDR_WATERFALL_ROWS=60
+CONFIG_SDR_DEFAULT_VOLUME_PCT=0                # default mute, naik lewat Vol+/Vol−
 CONFIG_SDR_ADC_ATTEN_DB=11
 CONFIG_SDR_ADC_POOL_BYTES=8192
 ```

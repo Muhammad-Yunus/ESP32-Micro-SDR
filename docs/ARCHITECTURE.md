@@ -137,7 +137,7 @@ typedef struct {
     int32_t nco_offset_hz;      // −CONFIG_SDR_NCO_LIMIT_HZ..+limit (default 2 MHz)
     int32_t nco_step_hz;        // 10/50/100/500/1k/10k/100k/1M
     uint8_t mode;               // SDR_MODE_USB / SDR_MODE_LSB
-    uint8_t volume_pct;         // 0..100
+    uint8_t volume_pct;         // 0..100 (default 0 = mute, naik lewat Vol+/Vol−)
     uint8_t agc_target;         // level target AGC
     int16_t lo_i, lo_q;         // (placeholder kalibrasi I/Q — future)
     uint16_t fft_bins;          // 1024 / 2048 (mode keluaran spektrum, F6)
