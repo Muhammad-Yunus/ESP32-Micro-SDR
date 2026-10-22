@@ -32,7 +32,9 @@ config SDR_WATERFALL_ROWS
     default 64
     help
         Number of waterfall lines (each line = one spectrum snapshot).
-        Reduce to 48 if internal RAM is tight.
+        The canvas is full-LCD width (480 px, RGB565 = 2 bytes/px).
+        If the allocation fails the UI falls back to 44 rows (ui_scope.c
+        WF_FALLBACK_ROWS); reduce this value further only if RAM is tight.
 
 config SDR_ADC_ATTEN_DB
     int "ADC attenuation (dB)"

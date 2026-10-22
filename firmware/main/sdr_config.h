@@ -60,7 +60,7 @@ int32_t sdr_config_span_half_get(void);
  * @brief Half-span efektif (Hz) yang benar-benar dapat ditampilkan.
  *
  * Nilai preset (sdr_config_span_half_get) di-clamp ke FS/2 karena sampler
- * 12 kHz hanyacovers +/-6 kHz sekitar DC. Preset 10 kHz tetap terpilih di
+ * 12 kHz hanya mencakup +/-6 kHz sekitar DC. Preset 10 kHz tetap terpilih di
  * UI, namun readout & plot memakai nilai efektif hasil fungsi ini.
  */
 int32_t sdr_config_span_half_effective(void);
