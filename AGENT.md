@@ -41,9 +41,17 @@ isi fitur; untuk ketersediaan API/pustaka, TECH_STACK yang menang mutlak.
 8. Core 1 = DSP real-time (prio 12/11), Core 0 = UI/LVGL (prio 4); audio tidak
    boleh drop, UI boleh drop frame (PRD NFR-1..3, ARCHITECTURE §9).
 9. Parameter runtime lewat `Kconfig.projbuild` / `sdr_config` — bukan angka
-   magic (CONVENTIONS.md §7).
+   magic (CONVENTIONS.md §7). Parameter **tampilan** (span LO, mode FFT bin)
+   hanya boleh diubah lewat setter `sdr_config_set_span_half()` /
+   `sdr_config_set_fft_bins()`; setelah skala berubah widget **wajib**
+   memanggil `ui_scope_refresh()`.
 10. Setiap perubahan selesai: `idf.py build` harus lulus tanpa warning baru;
     sebutkan ID FR di commit message (CONVENTIONS.md §8-9).
+11. Setiap perubahan fitur **wajib menyinkronkan dokumen**: `docs/PRD.md`,
+    `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/TECH_STACK.md`, dan
+    `README.md` harus mencerminkan perilaku kode yang baru — bukan rencana.
+    Nilai Kconfig baru ditulis di `firmware/sdkconfig.defaults` **dan**
+    diverifikasi lewat log boot (`idf.py monitor`) di board.
 
 ## Workflow kerja
 
@@ -59,6 +67,9 @@ isi fitur; untuk ketersediaan API/pustaka, TECH_STACK yang menang mutlak.
 - Sinyal I/Q dari Tayloe detector **eksternal**; LO (Si5351) dikontrol alat
   terpisah — firmware ini hanya memproses audio I/Q + menampilkan/menyetel
   offset NCO via UI.
-- Sampling: 48 kHz/kanal; demod SSB USB/LSB (Weaver); keluaran audio via
+- Sampling: 48 kHz/kanal → decim 12 kHz; demod SSB USB/LSB (Weaver); keluaran audio via
   **modulator sigma-delta (SDM) 1-bit di GPIO26** (`esp_driver_sdm`) —
   bukan `dac_continuous` (bentrok I2S0; lihat TECH_STACK §4.2/§6).
+- Tampilan: spektrum band penuh terpusat DC (2048 bin @5,86 Hz/bin atau 1024
+  bin @11,72 Hz/bin) dengan **skala runtime** dari Settings modal (ikon gear):
+  mode FFT bin 1024/2048 + span LO ±250 Hz…±10 kHz (efektif ≤ ±6 kHz).

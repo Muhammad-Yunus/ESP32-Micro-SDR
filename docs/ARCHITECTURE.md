@@ -33,7 +33,8 @@ jangan memindahkan tanggung jawab antar file tanpa revisi dokumen ini.
 │  lvgl_task (prio 4, BSP)                                                     │
 │    lv_timer 30 ms: drain fft_snap_q terbaru → spectrum FFT (esp-dsp)         │
 │                 → render spectrum bar + waterfall                            │
-│    touch: tombol ±/step/mode/volume, keypad entry, drag waterfall → offset   │
+│    touch: tombol ±/step/mode/volume, keypad entry, drag waterfall → offset│
+│    gear → modal Settings: mode FFT bin (1024/2048) + span LO (±250 Hz…10k) │
 │    sdr_config_set_*() ──(atomik)──► dibaca sdr_rx_task per blok              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -70,15 +71,16 @@ firmware/
 │   ├── idf_component.yml           # espressif/esp-dsp ^1.8.2
 │   ├── Kconfig.projbuild           # SELURUH parameter runtime (fs, ukuran FFT, span, atten, dst.)
 │   ├── app_main.c                  # urutan init + pembuatan task/queue (lihat §7)
-│   ├── sdr_config.h                # struct config runtime + API akses atomik (header-only boleh)
+│   ├── sdr_config.c / sdr_config.h # struct config runtime + API akses atomik
 │   ├── rx_adc.c / rx_adc.h         # adc_continuous + deinterleave I/Q
 │   ├── dsp_chain.c / dsp_chain.h   # seluruh DSP per blok + sdr_rx_task
 │   ├── audio_out.c / audio_out.h   # kanal SDM (GPIO26) + pool blok audio + audio_feed_task
 │   ├── spectrum.c / spectrum.h     # FFT esp-dsp → dB bins (dipanggil dari Core 0)
 │   └── ui/
-│       ├── ui_main.c / ui_main.h   # layout 480×320, freq text, tombol, keypad, timer UI
-│       ├── ui_scope.c / ui_scope.h # widget spectrum bar + waterfall
-│       └── ui_colors.c / ui_colors.h # LUT colormap waterfall (RGB565, 32 entri)
+│       ├── ui_main.c / ui_main.h   # layout 480×320, freq text, tombol, keypad, modal Settings
+│       ├── ui_scope.c / ui_scope.h # widget spectrum bar + waterfall (skala runtime)
+│       ├── ui_colors.c / ui_colors.h # LUT colormap waterfall (RGB565, 32 entri)
+│       └── font_dseg7_36.c         # font 7-segmen DSEG7 (regenerasi: TECH_STACK §7)
 └── components/
     └── bsp_esp323248s035/          # BSP disalin apa adanya dari repo referensi; JANGAN dimodifikasi
 ```
@@ -121,9 +123,13 @@ uint32_t  audio_out_update_count(void);            // total update density (diag
    mensintesis sinus langsung pada rate density (amplitudo x volume_pct). */
 
 /* spectrum.h */
+#define SPECTRUM_FFT_N         2048   // NFFT zero-pad (>= CONFIG_SDR_FFT_N)
+#define SPECTRUM_MAX_OUT_NBINS 2048   // mode 2048 = band penuh +/-FS/2
 esp_err_t spectrum_init(void);                     // dsps_fft2r_init_fc32 + window + pool
 void      spectrum_ingest(const iq_t *snapshot1024); // panggil di Core 1 (dsp_chain)
 bool      spectrum_get_db(float *out_db, int *out_nbins); // drain terbaru → UI
+                                               // out_db: *out_nbins nilai dB band
+                                               // penuh terpusat DC (index tengah = DC)
 
 /* sdr_config.h (lintas core) */
 typedef struct {
@@ -134,12 +140,26 @@ typedef struct {
     uint8_t volume_pct;         // 0..100
     uint8_t agc_target;         // level target AGC
     int16_t lo_i, lo_q;         // (placeholder kalibrasi I/Q — future)
+    uint16_t fft_bins;          // 1024 / 2048 (mode keluaran spektrum, F6)
+    int32_t span_half_hz;       // ± Hz dari LO: 250/500/1000/2000/5000/10000
 } sdr_config_t;
 void      sdr_config_get(sdr_config_t *out);       // snapshot atomik oleh DSP
 void      sdr_config_set_offset(int32_t hz);       // ditulis oleh UI
 void      sdr_config_set_mode(uint8_t mode);
+void      sdr_config_set_fft_bins(uint16_t bins);  // hanya 1024/2048 diterima
+void      sdr_config_set_span_half(int32_t hz);     // hanya preset yang valid
+uint16_t  sdr_config_fft_bins_get(void);           // mode aktif
+int32_t   sdr_config_span_half_get(void);          // preset aktif (mentah)
+int32_t   sdr_config_span_half_effective(void);    // preset di-clamp ke FS/2
+const int32_t *sdr_config_span_options(size_t *n); // daftar preset span
 /* ... setter lain; penulisannya di bawah spinlock/critical section singkat ... */
 ```
+
+Catatan mode FFT bin: `sdr_config.fft_bins` **tidak** memanggil ulang
+`dsps_fft2r_init_fc32` (tabel twiddle esp-dsp bersifat global dan hanya boleh
+di-init sekali). Mode 1024 diambil dari bin **genap** DFT-2048 yang sudah ada
+(`X₂₀₄₈[2m] == X₁₀₂₄[m]`), sehingga identik dengan DFT-1024 tanpa tambahan
+memori maupun inisialisasi.
 
 ---
 
@@ -155,10 +175,20 @@ Aturan kepemilikan:
 - Item di antrean adalah **pointer ke pool** — tidak ada copy data besar antar
   task. Pengirim tidak boleh memakai slot yang masih berada di antrean.
 - Buffer FFT (`s_fft`, window, `s_db`) dimiliki penuh oleh `spectrum` (heap
-  internal, **aligned 16 byte** — syarat assembly esp-dsp).
+  internal, **aligned 16 byte** — syarat assembly esp-dsp). `s_db` menampung
+  `SPECTRUM_MAX_OUT_NBINS` = 2048 float (8 KB BSS) agar mode bin 1024/2048
+  tidak perlu alokasi ulang.
+- Kanvas waterfall (`480 × 64` RGB565 = 60 KB) dialokasikan sekali di
+  `ui_scope_init()`; bila gagal → fallback 44 baris (41 KB), bila tetap gagal
+  → `ui_scope_init()` mengembalikan `ESP_ERR_NO_MEM` (UI tetap hidup tanpa
+  waterfall).
 - Buffer DSP kerja (FIR state, decimasi) dimiliki penuh oleh `dsp_chain`.
 - `sdr_config` dilindungi critical-section singkat (atau field atomik per
   scalar); tidak pernah dipertahankan sebagai pointer lintas task.
+
+Ukuran RAM terverifikasi di board (ESP32 klasik, tanpa PSRAM):
+`heap_init` ⇒ DRAM dinamis 75 KiB (`At 3FFCD030`); free heap setelah boot
+= **79 940 B**, steady-state = **84 660 B** (iris `sdr_rx` per ~2 s).
 
 ---
 
@@ -210,6 +240,10 @@ Catatan desain:
   `SDR_CH_LPF_HZ`, `SDR_AUDIO_LPF_HZ`, `SDR_AGC_TARGET` (0 = AGC off),
   `SDR_AGC_ATTACK_MS`, `SDR_AGC_RELEASE_MS`; override runtime `agc_target`
   lewat `sdr_config`.
+- Parameter display (F6): `SDR_FFT_N` (jendela analisis, 1024),
+  `SDR_AUDIO_FS_HZ` (12 000 Hz — penentu lebar bin = FS/jumlah bin dan batas
+  span FS/2 = 6 kHz), `SDR_DISPLAY_SPAN_HZ` (span awal ±500 Hz, dapat diubah
+  saat runtime dari Settings modal).
 
 ---
 
@@ -232,6 +266,10 @@ Catatan desain:
 
 Catatan: langkah 7–10 baru aktif saat fiturnya dibangun (F4/F5/F6); urutan relatifnya tetap.
 Langkah 11 dan 12 sudah aktif sejak F3.
+`spectrum_init()` memanggil `dsps_fft2r_init_fc32()` **sekali saja** — tabel
+twiddle esp-dsp bersifat global; inisialisasi ulang akan menimpa tabel dan
+menghasilkan spektrum salah. Mode bin 1024/2048 hanya memilih cara *menyusun
+keluaran* dari FFT yang sama (lihat §3).
 
 DILARANG:
 - Memanggil `bsp_init()` (secara tidak langsung menginisialisasi LDR pada
@@ -249,22 +287,26 @@ DILARANG:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ 20.000.000  [+1.200]  USB   S7   vol ▮▮▮▯▯                │  ~40 px
+│ 20.000.000  [+1.200]  USB   S7   vol ▮▮▮▯▯              ⚙  │  52 px (top bar)
 ├────────────────────────────────────────────────────────────┤
-│ |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||| ||||| │  ~136 px (spektrum line chart)
+│ dBFS  |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||  │  56..184 (plot 442×128)
+│  -20  ─────────────────────────────────────────────────    │  + strip label X 18 px
 ├────────────────────────────────────────────────────────────┤
-│                                                            │
-│              WATERFALL (canvas 464 × 64, RGB565)           │  ~64 px + margin
-│                                                            │
+│              WATERFALL (canvas 480 × 64, RGB565)           │  204..268
 ├────────────────────────────────────────────────────────────┤
-│ [USB/LSB]  [−] [+]  step 100  [Keypad]  [Vol−] [Vol+]     │  ~56 px
+│ [USB/LSB]  [−] [+]  step 100  [Keypad]  [Vol−] [Vol+]     │  56 px (bottom bar)
 └────────────────────────────────────────────────────────────┘
 ```
 
-- Waterfall: `lv_canvas` RGB565 464×64 (≈ 60 KB); update = `memmove` turun
-  satu baris + gambar baris baru + invalidate. Fallback RAM: 48 baris.
+Geometri (`ui_scope.c`): top bar 52 px, chart `SCOPE_Y=56` `BAR_H=128`,
+strip label X `XLABEL_H=18`, jarak `BAR_GAP=2` ⇒ waterfall mulai `WF_Y=204`.
+Lebar waterfall = `WF_W = SCOPE_W + YLABEL_W + PLOT_PAD_R = 480` (full LCD),
+sedangkan area plot chart 442 px (x30..471) + padding kanan 8 px.
+
+- Waterfall: `lv_canvas` RGB565 480×64 (≈ 60 KB); update = `memmove` turun
+  satu baris + gambar baris baru + invalidate. Fallback RAM: 44 baris (41 KB).
 - Spektrum: line chart kuning pucat 1 px digambar pada event
-  `LV_EVENT_DRAW_MAIN` (polyline ±345 titik, tanpa buffer penuh) — **satu
+  `LV_EVENT_DRAW_MAIN` (polyline ≤ 442 titik, tanpa buffer penuh) — **satu
   titik per bin FFT**: nilai asli tanpa interpolasi, x = posisi frekuensi
   bin. Window Hann 1024 @12 kHz di-zero-pad ke FFT 2048 (`SPECTRUM_FFT_N`)
   → 5,86 Hz/bin; RBW asli tetap 11,7 Hz. Keluaran = **band penuh
@@ -280,16 +322,28 @@ DILARANG:
   di-clamp ke FS/2 = 6 kHz (`sdr_config_span_half_effective()`) karena
   sampler 12 kHz hanya mencakup ±6 kHz; preset 10 kHz tetap terpilih tetapi
   readout menampilkan nilai efektif. Grid vertikal & label Hz ikut span
-  aktif: {−S, −S/2, 0, +S/2, +S}. `CONFIG_SDR_DISPLAY_SPAN_HZ` kini hanya
-  nilai awal saat boot.
+  aktif: {−S, −S/2, 0, +S/2, +S} (S = span efektif). `CONFIG_SDR_DISPLAY_SPAN_HZ`
+  kini hanya nilai awal saat boot.
 - Skala Y spektrum: **dBFS**, dasar dinamis = persentil 25 noise floor −
   40 dB (clamp [−180, 0]) sehingga trace selalu melayang 40 dB di atas
   dasar chart; atas +10 dBFS. Grid horizontal otomatis (step 10/20/50 dB)
   + label di strip kiri (satuan `dBFS` di pojok kiri atas, label 0
-  dilewati agar ruangnya untuk satuan); garis vertikal tiap 250 Hz + DC.
+  dilewati agar ruangnya untuk satuan).
 - Drag horizontal di waterfall mengubah `nco_offset_hz` sesuai span aktif.
 - Keypad LVGL mengubah `nco_offset_hz` atau `lo_label_hz` (mode entry dipilih
   tombol).
+
+### Modal Settings (ikon gear, top bar kanan)
+
+| Baris | Kontrol | Nilai | Efek |
+| :--- | :--- | :--- | :--- |
+| 1 | `FFT bin` | 1024 / 2048 (checkable) | `sdr_config_set_fft_bins()` → lebar bin 11,72 / 5,86 Hz/bin; readout Hz/bin di bawah tombol |
+| 2 | `LO span` | label + readout nilai efektif | `start-stop: +/-500 Hz`, atau `+/-6K Hz (max)` bila preset di-clamp FS/2 |
+| 3 | preset span | 250 / 500 / 1K / 2K / 5K / 10K (checkable) | `sdr_config_set_span_half()` → zoom tampilan |
+
+Setiap perubahan skala memanggil `ui_scope_refresh()`: sinkron span efektif,
+`memset` buffer waterfall (baris lama memakai skala sebelumnya), invalidate
+kanvas & objek chart.
 
 
 ---

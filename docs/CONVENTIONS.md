@@ -49,15 +49,19 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
 - Alokasi: `heap_caps_malloc(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)` untuk
   buffer DSP/UI; **buffer yang dipakai esp-dsp wajib aligned 16 byte**:
   ```c
-  static float s_fft[SDR_FFT_N * 2] __attribute__((aligned(16)));
+  static float s_fft[CONFIG_SDR_FFT_N * 2] __attribute__((aligned(16)));
   ```
 - **Tidak ada** `malloc`/`pvPortMalloc` di dalam loop per-blok atau ISR.
   Semua pool dialokasikan sekali saat init.
+- Buffer berkapasitas tetap (mis. `s_db` 2048 float untuk mode bin
+  1024/2048) diletakkan di BSS statis, bukan heap — supaya perubahan mode
+  runtime tidak menambah alokasi.
 - Tidak ada VLA dan tidak ada penuh-alokasi-di-stack untuk buffer besar
   (> 1 KB di stack = salah; pakai heap statis).
 - Tidak mengandalkan PSRAM (nonaktif dan tidak tersedia).
 - Mengukur: tambahkan init-log `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`
-  setelah setup — nilai dicatat di commit/test M3.
+  setelah setup — nilai dicatat di commit/test M3. Nilai terverifikasi F6:
+  free heap setelah boot 79 940 B, steady-state 84 660 B (iris `sdr_rx`).
 
 ---
 
@@ -106,6 +110,11 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
   `esp_lcd` dari UI (BSP/LVGL yang mengelola).
 - Widget spektrum/waterfall menerima data **hanya** melalui
   `ui_scope_push()` / `spectrum_get_db()` — UI tidak tahu asal data.
+- Parameter tampilan (span, mode FFT bin) hanya boleh diubah lewat setter
+  `sdr_config_set_span_half()` / `sdr_config_set_fft_bins()`, dibaca widget
+  lewat getter. Setelah skala berubah, widget **wajib** memanggil
+  `ui_scope_refresh()` (resync skala efektif + bersihkan waterfall) supaya
+  baris lama tidak tertinggal dengan skala sebelumnya.
 - Warna: semua RGB565 lewat helper di `ui_colors.h` (termasuk colormap
   waterfall) — tanpa literal warna tersebar.
 
@@ -133,12 +142,15 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
 
 ## 8. Git
 
-- Commit message gaya imperative, ringkas, bahasa Inggris:
-  `feat(dsp): add NCO offset mixer with LUT sin/cos`,
-  `fix(adc): handle pool overflow counter`,
-  `docs: add PRD and architecture spec`.
+- Commit message ringkas, **bahasa Indonesia**, awalan ID fitur/milestone:
+  `F6: line chart interpolasi linear antar bin (hilangkan step)`,
+  `F5: NCO offset mixer + LUT sin/cos`,
+  `docs: tambah PRD dan spesifikasi arsitektur`.
 - Satu commit = satu perubahan logis; jangan campur formatting dengan fitur.
 - Jangan commit direktori `build/` (tambahkan `.gitignore` root pada M0).
+- `firmware/sdkconfig` **gitignored** (hasil `menuconfig` lokal) — perubahan
+  nilai Kconfig harus ditulis juga ke `firmware/sdkconfig.defaults` supaya
+  build lain (CI, orang lain) dapat hasil yang sama.
 
 ---
 
@@ -150,3 +162,8 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
 - [ ] Tidak ada `malloc` di loop, tidak ada logging per-blok.
 - [ ] Build bersih tanpa warning baru; `idf.py build` lulus.
 - [ ] Counter diagnostik (xrun/overrun) bertambah jika fault disuntik.
+- [ ] **Dokumen tersinkron**: `docs/PRD.md`, `docs/ARCHITECTURE.md`,
+      `docs/CONVENTIONS.md`, `docs/TECH_STACK.md` dan `README.md` sudah
+      mencerminkan perilaku kode yang baru (bukan rencana).
+- [ ] Nilai Kconfig baru ditulis di `sdkconfig.defaults` **dan** diverifikasi
+      lewat log boot di board.

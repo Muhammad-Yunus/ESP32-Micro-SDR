@@ -9,7 +9,7 @@
 [![ESP32 WROOM](https://img.shields.io/badge/chip-ESP32%20WROOM-32-24B45E?label=chip&logo=espressif&logoColor=white)](https://www.espressif.com/en/products/modules/esp32)
 [![C11](https://img.shields.io/badge/language-C11-00589A)]()
 [![FreeRTOS](https://img.shields.io/badge/RTOS-FreeRTOS-green)]()
-[![LVGL 9.1](https://img.shields.io/badge/UI-LVGL%209.1-orange)]()
+[![LVGL 9.6](https://img.shields.io/badge/UI-LVGL%209.6-orange)]()
 [![esp-dsp 1.8.2](https://img.shields.io/badge/DSP-esp--dsp%201.8.2-purple)]()
 [![sigma-delta audio](https://img.shields.io/badge/audio--out-Sigma--Delta%201--bit-007EC6)]()
 [![SSB USB/LSB](https://img.shields.io/badge/mode-SSB%20USB/LSB-red)]()
@@ -31,7 +31,7 @@
 | MCL ADE-1 | Mixer down-sampling HF → baseband audio | — |
 | M5 Cardputer Si5351 VFO | LO quadrature (90°) untuk Tayloe detector, dikontrol terpisah (I2C M5) | [repo](https://github.com/Muhammad-Yunus/M5Cardputer-Si5351-VFO) |
 | Tayloe Detector (DIY) | Quadrature sampling detector berbasis FST3253, PCB Matrix | — |
-| ESP32-Micro-SDR (repo ini) | ADC sampling, DSP chain, FFT, UI spektrum/waterfall, audio out SDM | — |
+| ESP32-Micro-SDR (repo ini) | ADC sampling, DSP chain, FFT, UI spektrum/waterfall + Settings runtime, audio out SDM | — |
 
 ---
 
@@ -42,11 +42,34 @@
 - [x] Demodulasi SSB Weaver (USB/LSB, BFO 1500 Hz) @12 kHz pasca-decimation
 - [x] AGC (attack 5 ms / release 200 ms) + volume 0–100 %
 - [x] Audio out sigma-delta 1-bit @10 MHz carrier (GPIO26 → FM8002A)
-- [x] FFT 1024 @12 kHz, Hann window, skala dBFS (clamp bawah −148)
-- [x] Line chart spektrum ±3 kHz, 1 bin/piksel, marker puncak + chip frekuensi
-- [x] Waterfall 64 baris RGB565 (fallback 48), colormap 32 entri
+- [x] Spektrum: jendela Hann 1024 @12 kHz di-zero-pad ke FFT 2048 (5,86 Hz/bin),
+      skala dBFS; mode bin **1024/2048** (11,72 / 5,86 Hz/bin) bisa diganti
+      saat runtime
+- [x] Line chart spektrum **span runtime ±250 Hz…±10 kHz** (efektif ≤ ±6 kHz =
+      Nyquist), 1 bin/piksel (envelope max bila bin > piksel), marker puncak +
+      chip frekuensi
+- [x] Waterfall 480×64 RGB565 (fallback 44 baris), colormap 32 entri
+- [x] Settings modal (ikon gear di top bar): mode FFT bin + span LO runtime
 - [x] Drag horizontal waterfall = tuning NCO offset
-- [x] UI LVGL 9.1: top bar (LO label + offset), bottom bar (mode, ±, step, volume, keypad)
+- [x] UI LVGL 9.6: top bar (LO label + offset + volume + gear), bottom bar
+      (mode, ±, step, keypad, volume)
+
+---
+
+## Pengaturan Runtime (Settings modal)
+
+Ikon **gear** di pojok kanan top bar membuka modal **Settings** dengan dua
+kelompok kontrol yang langsung berlaku (tanpa restart):
+
+| Kontrol | Nilai | Efek |
+| :--- | :--- | :--- |
+| **FFT bin** | 1024 / 2048 | Lebar bin keluaran spektrum 11,72 → 5,86 Hz/bin (RBW asli tetap 11,7 Hz). Mode 1024 memakai bin genap DFT-2048 — secara matematis identik dengan DFT-1024, tanpa inisialisasi FFT tambahan. |
+| **LO span** | ±250 / ±500 / ±1k / ±2k / ±5k / ±10k Hz | Half-width tampilan spektrum & waterfall. Nilai efektif di-clamp ke FS/2 = 6 kHz (sampler 12 kHz): preset 10k tetap terpilih, readout menampilkan `±6K Hz (max)`. |
+
+Perubahan skala juga memperbarui grid vertikal, label sumbu Hz, marker
+puncak, dan **membersihkan waterfall** (baris lama memakai skala sebelumnya).
+Semua state runtime disimpan di `sdr_config` (`sdr_config.fft_bins`,
+`sdr_config.span_half_hz`) dengan critical section singkat.
 
 ---
 
@@ -90,14 +113,17 @@ ESP32-Micro-SDR/
     ├── main/
     │   ├── Kconfig.projbuild
     │   ├── app_main.c           # Init granular (tanpa bsp_init)
-    │   ├── sdr_config.c/h       # Runtime config (NCO, LO label, volume, AGC)
+    │   ├── sdr_config.c/h       # Runtime config (NCO, LO label, volume, AGC,
+    │   │                        #   mode FFT bin, span LO)
     │   ├── rx_adc.c/h           # ADC DMA I/Q (48 kHz, 12-bit)
     │   ├── dsp_chain.c/h        # DC block, NCO, LPF/decim, Weaver, AGC, audio out
-    │   ├── spectrum.c/h         # FFT 1024 pool + Hann + dBFS
+    │   ├── spectrum.c/h         # FFT 2048 zero-pad (jendela 1024) + dBFS
+    │   ├── audio_out.c/h        # SDM 1-bit GPIO26 + audio_feed_task
     │   └── ui/
-    │       ├── ui_main.c/h      # Layout, keypad, tombol
+    │       ├── ui_main.c/h      # Layout, keypad, tombol, Settings modal
     │       ├── ui_scope.c/h     # Spectrum line chart + waterfall + drag
-    │       └── ui_colors.c/h    # Palette + LUT colormap 32 entri
+    │       ├── ui_colors.c/h    # Palette + LUT colormap 32 entri
+    │       └── font_dseg7_36.c  # Font 7-segmen DSEG7 (SIL OFL 1.1)
     ├── components/
     │   └── bsp_esp323248s035/   # BSP CYD (black box)
     └── managed_components/      # lvgl, esp-dsp (via registry)
@@ -110,9 +136,14 @@ ESP32-Micro-SDR/
 ```bash
 # Prasyarat: ESP-IDF v6.1
 cd firmware
-idf.py -p COM10 build
-idf.py -p COM10 flash monitor
+idf.py build
+idf.py -p <PORT> flash      # PORT = CH340 board, mis. COM10/COM12
+idf.py -p <PORT> monitor    # log boot: heap, rate ADC, status DSP
 ```
+
+> Port board bisa berubah enumerasi Windows (mis. COM3 → COM10 → COM12).
+> Cek dengan Device Manager / `Get-PnpDevice -Class Ports` bila flash gagal
+> "could not open port".
 
 ## Project Terkait
 

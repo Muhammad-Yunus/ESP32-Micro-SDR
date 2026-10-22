@@ -136,12 +136,15 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Kepadatan tampilan: `spectrum_get_db()` zero-pad ke 2048 titik
   (5,86 Hz/bin, keluaran band penuh terpusat DC); titik line chart = bin
   asli **tanpa interpolasi**, RBW asli tetap 11,7 Hz.
-- **Skala runtime** (ikon gear → Settings modal, replaces nilai build-time):
+- **Skala runtime** (ikon gear → Settings modal, menggantikan nilai build-time):
   - mode FFT bin **1024** (11,72 Hz/bin) atau **2048** (5,86 Hz/bin); mode
     1024 memakai bin genap DFT-2048 (identik dengan DFT-1024).
   - span LO **±250 / ±500 / ±1k / ±2k / ±5k / ±10k Hz**; nilai efektif
     dijepit ke FS/2 = 6 kHz (sampler 12 kHz) dan preset 10 kHz tetap
     terpilih dengan readout nilai efektif.
+- Grid vertikal, label sumbu Hz, marker puncak dan waterfall mengikuti skala
+  aktif; perubahan skala **membersihkan waterfall** (baris lama memakai
+  skala sebelumnya).
 - Tampilan: bar spektrum selebar area tengah frekuensi tuned.
 - Refresh mengikuti timer UI (~30 ms); **frame boleh drop** (snapshot terbaru
   menangani yang lama).
@@ -160,20 +163,29 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   **diinput user via keypad — murni label visual** karena LO riil dikontrol
   alat terpisah) + offset NCO (mis. `[+1.200]`).
 - Frekuensi aktual yang dirujuk = `lo_label + nco_offset`.
+- Bar atas juga memuat indikator volume (ikon + 5 bar + persentase) dan ikon
+  **gear** untuk membuka modal Settings; bar bawah memuat mode USB/LSB,
+  tombol ±, step, keypad, dan kontrol volume.
 - **Acceptance**: perubahan offset langsung tercermin di teks; mode (USB/LSB),
-  langkah step, dan S-meter terlihat.
+  langkah step, dan readout dBFS di chip puncak terlihat.
 
 ### FR-9 — UI & Input Touch
-- Layout landscape 480×320: bar frekuensi atas, waterfall, bar spektrum,
-  bar bawah (tombol mode USB/LSB, ±, step, volume, keypad).
+- Layout landscape 480×320: bar frekuensi atas (52 px), area spektrum +
+  waterfall (56..268), bar bawah (56 px).
 - Keypad angka LVGL untuk entry offset & label LO langsung.
+- Modal Settings (ikon gear): mode FFT bin (1024/2048) dan preset span LO
+  (±250 Hz…±10 kHz) — perubahan berlaku langsung tanpa restart.
 - **Acceptance**: seluruh kontrol dapat dijangkau tanpa restart; debounce
   touch wajar; tidak ada ghost-touch.
 
-### FR-10 — S-Meter
-- Indikasi kekuatan sinyal dari level pasca-AGC (skala S1–S9+ atau dB),
-  diperbarui ≥ 10 Hz.
-- **Acceptance**: bergerak naik-turun mengikuti sinyal uji.
+### FR-10 — Indikator Level Sinyal
+- Indikasi kekuatan sinyal dari level spektrum: **chip puncak** di pojok
+  chart menampilkan frekuensi puncak (MHz 5 desimal) + level dBFS, dan
+  **segitiga/garis merah** menandai posisi puncak.
+- Skala S1–S9+ **belum** diimplementasikan (lihat §5 Out of Scope) — yang
+  dipakai adalah nilai dBFS absolut (0 dBFS = full-scale I/Q).
+- **Acceptance**: nilai dBFS chip puncak berubah ≥ 10 Hz mengikuti sinyal uji
+  dan agree dengan puncak garis spektrum.
 
 ---
 
@@ -185,7 +197,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 | NFR-2 | Prioritas task | `sdr_rx` = 12, `audio_feed` = 11, LVGL = 4 |
 | NFR-3 | Audio real-time | Sinyal audio **tidak boleh drop**; UI/spektrum boleh drop frame |
 | NFR-4 | Waktu boot ke layar aktif | < 3 detik |
-| NFR-5 | RAM internal terpakai (DSP+UI) | ≤ ~121 KB di atas IDF+LVGL; verifikasi `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)` |
+| NFR-5 | RAM internal terpakai (DSP+UI) | ≤ ~121 KB di atas IDF+LVGL; verifikasi `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`. Terukur di board: free heap **79 940 B** setelah boot, **84 660 B** steady-state |
 | NFR-6 | PSRAM | Tidak tersedia dan tidak diandalkan |
 | NFR-7 | CPU | 240 MHz, optimasi `-O2` (`CONFIG_COMPILER_OPTIMIZATION_PERF`) |
 | NFR-8 | Stabilitas | 10 menit run tanpa WDT reset, tanpa xrun audio steady-state |
@@ -202,8 +214,9 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - WiFi / Bluetooth / jaringan apa pun (nonaktif; hemat RAM & gangguan ADC).
 - Kalibrasi I/Q imbalance (amplitudo/fase) — dicadangkan; struktur kode
   menyisakan slot koreksi setelah FR-2.
+- Skala S-meter S1–S9+ (FR-10 memakai readout dBFS absolut).
 - Koreksi skew waktu antar-kanal ADC (sub-mikrodetik — tidak material untuk
-  bandwidth 3 kHz).
+  bandwidth 6 kHz).
 
 ---
 
@@ -218,6 +231,11 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 | M4 | AGC + tuning + polish | Drag/keypad menyetel offset, teks freq akurat | Uji sinyal RF nyata |
 | M5 | Ekstensi (opsional) | CW / squelch / rekam SD | — |
 
+Status saat ini: M0–M4 **terpasang & berjalan di board** (F1 sampling, F2 UI,
+F3 ADC DMA, F4 audio SDM, F5 rantai DSP/AGC, F6 spektrum+waterfall+Settings
+runtime). Pengesahan visual (≥20 fps, tonal terlihat, AGC) dilakukan manual
+oleh pengguna di board.
+
 ---
 
 ## 7. Risiko & Mitigasi
@@ -228,6 +246,6 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 | **Bentrok I2S0**: `adc_continuous` dan `dac_continuous` sama-sama memakai I2S0 pada ESP32 (`ADC_HAL_DMA_I2S_HOST 0`, `DAC_DMA_PERIPH_I2S_NUM 0`) → acquire kedua gagal (`ESP_ERR_NOT_FOUND`) | **Jangan pakai `dac_continuous`/`bsp_audio_init()`**; audio out lewat SDM 1-bit (GPIO26) |
 | `bsp_ldr_init()` memakai `adc_oneshot` ADC1_CH6 → bentrok dengan ADC1 continuous DMA | **Dilarang memanggil `bsp_ldr_init()`** selama ADC DMA I/Q aktif |
 | Rate ADC aktual meleset dari parameter "expected" | Ukur rate aktual; kalibrasi konstanta NCO/bin dari rate terukur |
-| RAM waterfall terlalu besar | Mulai 64 baris (60 KB); fallback 48 baris (45 KB) |
+| RAM waterfall terlalu besar | Mulai 64 baris (60 KB); fallback 44 baris (41 KB) |
 | ADC ESP32 nonlinier/noise | Attenuation 11 dB, bias tengah, DC block, rata-rata/decim anti-alias |
 | Klik audio saat start/stop | Mulai stream dengan zero-fill; AGC attack cepat |

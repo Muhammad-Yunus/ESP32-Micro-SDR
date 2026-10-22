@@ -25,7 +25,7 @@ ESP-IDF v6.1 atau component registry.
 | Pustaka | Versi | Dipakai untuk | Cara pasang |
 | :--- | :--- | :--- | :--- |
 | `espressif/esp-dsp` | **^1.8.2** (terbaru saat penulisan: 1.8.2, rilis 2026-05-11) | FFT, FIR/decimasi, window, utilitas DSP | `idf.py add-dependency "espressif/esp-dsp^1.8.2"` di `firmware/main/idf_component.yml` |
-| `lvgl/lvgl` | **^9.1.0** (terkunci 9.6.0~1 di repo referensi) | Seluruh UI | Tidak perlu ditambah manual — sudah ditarik oleh komponen BSP |
+| `lvgl/lvgl` | **^9.1.0** (terkunci 9.6.0~1 di repo referensi; **terverifikasi 9.6 di board** lewat log boot `bsp_lvgl: LVGL 9.6 initialized (480x320)`) | Seluruh UI | Tidak perlu ditambah manual — sudah ditarik oleh komponen BSP |
 
 Catatan: `dependencies.lock` akan terbentuk otomatis saat build pertama —
 commit file tersebut.
@@ -100,7 +100,7 @@ Fakta penting (`esp_driver_sdm/src/sdm.c`):
 
 | Fungsi | Peran | Catatan |
 | :--- | :--- | :--- |
-| `dsps_fft2r_init_fc32(NULL, N)` | Init twiddle FFT (sekali, di `spectrum_init`) | N = `CONFIG_DSP_MAX_FFT_SIZE` (Kconfig esp-dsp) |
+| `dsps_fft2r_init_fc32(NULL, N)` | Init twiddle FFT (sekali, di `spectrum_init`) | N = `CONFIG_DSP_MAX_FFT_SIZE` (Kconfig esp-dsp) = **2048**. **Hanya boleh dipanggil sekali** — tabel twiddle bersifat global |
 | `dsps_fft2r_fc32(data, N)` | FFT kompleks radix-2 (ada varian asm `ae32` untuk ESP32) | data interleaved `Re[0],Im[0],…`, **aligned 16** |
 | `dsps_bit_rev_fc32(data, N)` | Bit-reverse — dipanggil **SETELAH** `dsps_fft2r_fc32` | urutan resmi dari contoh repo |
 | `dsps_cplx2reC_fc32(data, N)` | Split hasil FFT ke array re[]/im[] | |
@@ -119,6 +119,12 @@ dsps_bit_rev_fc32(s_fft, N);      // 2. bit-reverse
 dsps_cplx2reC_fc32(s_fft, N);     // 3. split
 db[k] = 10.f*log10f((re*re + im*im) / N);              // 4. power dB
 ```
+
+**Mode bin runtime 1024 vs 2048** (F6): FFT **hanya** dijalankan pada N=2048.
+Mode 1024 diambil dari bin genap hasil FFT-2048 (`X₂₀₄₈[2m] == X₁₀₂₄[m]`,
+terverifikasi numerik dengan galat maks 2,3e-14) → identik dengan DFT-1024 tanpa
+inisialisasi ulang, tanpa tabel twiddle tambahan, dan tanpa alokasi heap
+tambahan. Jangan memanggil `dsps_fft2r_init_fc32()` ulang untuk mode ini.
 
 ### 4.5 FreeRTOS & utilitas IDF
 `xTaskCreatePinnedToCore`, queue (`xQueueCreate/Send/Receive/Overwrite` semu
@@ -141,9 +147,25 @@ CONFIG_BSP_TFT_SPI_CLK_HZ=80000000
 CONFIG_BSP_AMP_DRIVER_DAC=y
 CONFIG_BSP_LVGL_TASK_CORE=0
 ```
+Parameter aplikasi (`main/Kconfig.projbuild`, menu `SDR Configuration`) —
+nilai default harus identik dengan `firmware/sdkconfig.defaults`:
+
+```
+CONFIG_SDR_ADC_FS_HZ=48000
+CONFIG_SDR_FFT_N=1024                        # jendela analisis (zero-pad ke 2048)
+CONFIG_SDR_AUDIO_FS_HZ=12000                 # FS post-decimasi → batas span ±6 kHz
+CONFIG_SDR_DISPLAY_SPAN_HZ=500               # span awal, dapat diubah saat runtime
+CONFIG_SDR_BFO_HZ=1500
+CONFIG_SDR_WATERFALL_ROWS=64
+CONFIG_SDR_ADC_ATTEN_DB=11
+CONFIG_SDR_ADC_POOL_BYTES=8192
+```
+
 Catatan: ukuran flash partisi default skeleton = 2 MB — verifikasi ukuran flash
 sesungguhnya board dengan `esptool.py flash_id` saat M0 dan sesuaikan jika
-board berisi 4/8 MB.
+board berisi 4/8 MB. (Board terverifikasi 2 MB; log boot: "Detected size(4096k)
+larger than the size in the binary image header(2048k)" — image header 2 MB
+yang dipakai.)
 
 ---
 
@@ -165,6 +187,8 @@ board berisi 4/8 MB.
 | PSRAM (`CONFIG_ESP32_SPIRAM_SUPPORT`) | Tidak aktif di board/konfigurasi ini |
 | WiFi, BT, mDNS, HTTP | Tidak dipakai (RAM & interferensi ADC) |
 | `double` di jalur DSP | Gunakan `float` |
+| `dsps_fft2r_init_fc32()` dipanggil lebih dari sekali | Tabel twiddle esp-dsp global; inisialisasi kedua menimpa tabel → spektrum salah. Mode bin 1024/2048 achieved lewat **pemilihan bin keluar**, bukan init ulang |
+| Alokasi heap per perubahan skala tampilan | Mode FFT bin & spanLO hanya mengubah field `sdr_config` + `ui_scope_refresh()`; buffer `s_db` 2048 float dialokasikan di BSS statis |
 | FreeRTOS `xQueueOverwrite` untuk audio | Audio memakai drop-baru + xrun counter; overwrite hanya untuk snapshot UI |
 
 ---
