@@ -61,7 +61,7 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
 - Tidak mengandalkan PSRAM (nonaktif dan tidak tersedia).
 - Mengukur: tambahkan init-log `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`
   setelah setup — nilai dicatat di commit/test M3. Nilai terverifikasi F6:
-  free heap setelah boot 79 940 B, steady-state 84 660 B (iris `sdr_rx`).
+  free heap setelah boot 81 988 B, steady-state 86 708 B (iris `sdr_rx`).
 
 ---
 
@@ -130,7 +130,7 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
   CONFIG_SDR_FFT_N=1024
   CONFIG_SDR_DISPLAY_SPAN_HZ=500
   CONFIG_SDR_BFO_HZ=1500
-  CONFIG_SDR_WATERFALL_ROWS=64
+  CONFIG_SDR_WATERFALL_ROWS=60
   CONFIG_SDR_ADC_ATTEN_DB=11
   ```
 - Nilai default harus sama dengan yang tertulis di `sdkconfig.defaults`.

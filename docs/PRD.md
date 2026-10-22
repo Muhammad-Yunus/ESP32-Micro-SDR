@@ -171,7 +171,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 
 ### FR-9 — UI & Input Touch
 - Layout landscape 480×320: bar frekuensi atas (52 px), area spektrum +
-  waterfall (56..268), bar bawah (56 px).
+  waterfall (56..264), bar bawah (56 px).
 - Keypad angka LVGL untuk entry offset & label LO langsung.
 - Modal Settings (ikon gear): mode FFT bin (1024/2048) dan preset span LO
   (±250 Hz…±10 kHz) — perubahan berlaku langsung tanpa restart.
@@ -197,7 +197,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 | NFR-2 | Prioritas task | `sdr_rx` = 12, `audio_feed` = 11, LVGL = 4 |
 | NFR-3 | Audio real-time | Sinyal audio **tidak boleh drop**; UI/spektrum boleh drop frame |
 | NFR-4 | Waktu boot ke layar aktif | < 3 detik |
-| NFR-5 | RAM internal terpakai (DSP+UI) | ≤ ~121 KB di atas IDF+LVGL; verifikasi `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`. Terukur di board: free heap **79 940 B** setelah boot, **84 660 B** steady-state |
+| NFR-5 | RAM internal terpakai (DSP+UI) | ≤ ~121 KB di atas IDF+LVGL; verifikasi `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`. Terukur di board: free heap **81 988 B** setelah boot, **86 708 B** steady-state |
 | NFR-6 | PSRAM | Tidak tersedia dan tidak diandalkan |
 | NFR-7 | CPU | 240 MHz, optimasi `-O2` (`CONFIG_COMPILER_OPTIMIZATION_PERF`) |
 | NFR-8 | Stabilitas | 10 menit run tanpa WDT reset, tanpa xrun audio steady-state |
@@ -246,6 +246,6 @@ oleh pengguna di board.
 | **Bentrok I2S0**: `adc_continuous` dan `dac_continuous` sama-sama memakai I2S0 pada ESP32 (`ADC_HAL_DMA_I2S_HOST 0`, `DAC_DMA_PERIPH_I2S_NUM 0`) → acquire kedua gagal (`ESP_ERR_NOT_FOUND`) | **Jangan pakai `dac_continuous`/`bsp_audio_init()`**; audio out lewat SDM 1-bit (GPIO26) |
 | `bsp_ldr_init()` memakai `adc_oneshot` ADC1_CH6 → bentrok dengan ADC1 continuous DMA | **Dilarang memanggil `bsp_ldr_init()`** selama ADC DMA I/Q aktif |
 | Rate ADC aktual meleset dari parameter "expected" | Ukur rate aktual; kalibrasi konstanta NCO/bin dari rate terukur |
-| RAM waterfall terlalu besar | Mulai 64 baris (60 KB); fallback 44 baris (41 KB) |
+| RAM waterfall terlalu besar | Mulai 60 baris (56 KB); fallback 44 baris (41 KB) |
 | ADC ESP32 nonlinier/noise | Attenuation 11 dB, bias tengah, DC block, rata-rata/decim anti-alias |
 | Klik audio saat start/stop | Mulai stream dengan zero-fill; AGC attack cepat |

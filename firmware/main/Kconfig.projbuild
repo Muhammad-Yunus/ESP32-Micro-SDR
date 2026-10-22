@@ -29,12 +29,16 @@ config SDR_BFO_HZ
 
 config SDR_WATERFALL_ROWS
     int "Waterfall rows"
-    default 64
+    default 60
     help
         Number of waterfall lines (each line = one spectrum snapshot).
-        The canvas is full-LCD width (480 px, RGB565 = 2 bytes/px).
-        If the allocation fails the UI falls back to 44 rows (ui_scope.c
-        WF_FALLBACK_ROWS); reduce this value further only if RAM is tight.
+        The canvas is full-LCD width (480 px, RGB565 = 2 bytes/px) and
+        starts at WF_Y = 204, so 60 rows exactly fill the area above the
+        bottom bar (which starts at y = 264). More rows would be hidden
+        behind the bottom bar.
+        If the allocation fails the UI falls back to 44 rows
+        (ui_scope.c WF_FALLBACK_ROWS); reduce this value further only if
+        RAM is tight.
 
 config SDR_ADC_ATTEN_DB
     int "ADC attenuation (dB)"

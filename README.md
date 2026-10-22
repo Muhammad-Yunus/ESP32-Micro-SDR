@@ -48,7 +48,7 @@
 - [x] Line chart spektrum **span runtime ±250 Hz…±10 kHz** (efektif ≤ ±6 kHz =
       Nyquist), 1 bin/piksel (envelope max bila bin > piksel), marker puncak +
       chip frekuensi
-- [x] Waterfall 480×64 RGB565 (fallback 44 baris), colormap 32 entri
+- [x] Waterfall 480×60 RGB565 (fallback 44 baris), colormap 32 entri
 - [x] Settings modal (ikon gear di top bar): mode FFT bin + span LO runtime
 - [x] Drag horizontal waterfall = tuning NCO offset
 - [x] UI LVGL 9.6: top bar (LO label + offset + volume + gear), bottom bar

@@ -178,7 +178,7 @@ Aturan kepemilikan:
   internal, **aligned 16 byte** — syarat assembly esp-dsp). `s_db` menampung
   `SPECTRUM_MAX_OUT_NBINS` = 2048 float (8 KB BSS) agar mode bin 1024/2048
   tidak perlu alokasi ulang.
-- Kanvas waterfall (`480 × 64` RGB565 = 60 KB) dialokasikan sekali di
+- Kanvas waterfall (`480 × 60` RGB565 = 56 KB) dialokasikan sekali di
   `ui_scope_init()`; bila gagal → fallback 44 baris (41 KB), bila tetap gagal
   → `ui_scope_init()` mengembalikan `ESP_ERR_NO_MEM` (UI tetap hidup tanpa
   waterfall).
@@ -188,7 +188,7 @@ Aturan kepemilikan:
 
 Ukuran RAM terverifikasi di board (ESP32 klasik, tanpa PSRAM):
 `heap_init` ⇒ DRAM dinamis 75 KiB (`At 3FFCD030`); free heap setelah boot
-= **79 940 B**, steady-state = **84 660 B** (iris `sdr_rx` per ~2 s).
+= **81 988 B**, steady-state = **86 708 B** (iris `sdr_rx` per ~2 s).
 
 ---
 
@@ -292,7 +292,7 @@ DILARANG:
 │ dBFS  |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||  │  56..184 (plot 442×128)
 │  -20  ─────────────────────────────────────────────────    │  + strip label X 18 px
 ├────────────────────────────────────────────────────────────┤
-│              WATERFALL (canvas 480 × 64, RGB565)           │  204..268
+│              WATERFALL (canvas 480 × 60, RGB565)           │  204..264
 ├────────────────────────────────────────────────────────────┤
 │ [USB/LSB]  [−] [+]  step 100  [Keypad]  [Vol−] [Vol+]     │  56 px (bottom bar)
 └────────────────────────────────────────────────────────────┘
@@ -303,11 +303,10 @@ strip label X `XLABEL_H=18`, jarak `BAR_GAP=2` ⇒ waterfall mulai `WF_Y=204`.
 Lebar waterfall = `WF_W = SCOPE_W + YLABEL_W + PLOT_PAD_R = 480` (full LCD),
 sedangkan area plot chart 442 px (x30..471) + padding kanan 8 px.
 
-- Waterfall: `lv_canvas` RGB565 480×64 (≈ 60 KB); update = `memmove` turun
+- Waterfall: `lv_canvas` RGB565 480×60 (≈ 56 KB); update = `memmove` turun
   satu baris + gambar baris baru + invalidate. Fallback RAM: 44 baris (41 KB).
-  Catatan geometri: kanvas mulai `WF_Y=204` dan setinggi 64 baris (sampai
-  y=267), sedangkan bottom bar mulai y=264 → **4 baris paling bawah kanvas
-  tertutup bottom bar**; area waterfall yang terlihat = 60 baris.
+  Jumlah baris (`CONFIG_SDR_WATERFALL_ROWS` = 60) dipilih agar kanvas tepat
+  mengisi area di atas bottom bar (y 204..264) tanpa baris tertutup.
 - Spektrum: line chart kuning pucat 1 px digambar pada event
   `LV_EVENT_DRAW_MAIN` (polyline ≤ 442 titik, tanpa buffer penuh) — **satu
   titik per bin FFT**: nilai asli tanpa interpolasi, x = posisi frekuensi
