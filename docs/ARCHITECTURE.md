@@ -215,8 +215,8 @@ Aturan kepemilikan:
   scalar); tidak pernah dipertahankan sebagai pointer lintas task.
 
 Ukuran RAM terverifikasi di board (ESP32 klasik, tanpa PSRAM):
-`heap_init` ⇒ DRAM dinamis 75 KiB (`At 3FFCD030`); free heap setelah boot
-= **81 988 B**, steady-state = **86 708 B** (iris `sdr_rx` per ~2 s).
+`heap_init` ⇒ DRAM dinamis 75 KiB (`At 3FFCD078`); free heap setelah boot
+= **81 908 B**, steady-state = **86 628 B** (iris `sdr_rx` per ~2 s).
 
 ---
 

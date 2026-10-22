@@ -80,6 +80,8 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - **Acceptance**: rate terukur dalam ±2 % dari target; pasangan I/Q per
   timestamp identik (interleaved back-to-back); counter overrun DMA = 0
   setelah 10 menit.
+  *Terverifikasi 2026-10-22 (soak 10 menit produksi): rate 47 999–48 000 Hz,
+  `ovf 0`, `xrun 0`, heap konstan 86 628 B, tanpa panic/WDT.*
 
 ### FR-2 — DC Removal
 - High-pass 1 bentuk IIR per kanal: `y[n] = x[n] − x[n−1] + R·y[n−1]`,
@@ -106,6 +108,11 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Lookup sin/cos (LUT ≥ 1024 entri + interpolasi linear) — tanpa trig per-sampel.
 - **Acceptance**: tonal pada input I/Q berpindah di layar sesuai offset;
   error frekuensi hasil tuning < 1 Hz pada 1 kHz (terverifikasi tone test).
+  *Status (self-test 2026-10-22): T03 (tone 2 000 Hz + offset 1 000 Hz)
+  mengukur puncak **1002,0 Hz** → galat 2 Hz. Batas ukur saat ini adalah
+  resolusi FFT 12 000/2048 = 5,86 Hz/bin dengan capture 85 ms, sehingga
+  syarat < 1 Hz belum dapat dibuktikan. Perlu estimator presisi (Goertzel
+  ≥ 1 s) atau revisi acceptance — menunggu keputusan.*
 
 ### FR-4 — Demodulasi SSB (USB/LSB)
 - Struktur **Weaver / phasing dua mixer** (bukan Hilbert — dipilih karena
@@ -125,7 +132,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Keluaran: `int8` (pulse density) → `sdm_channel_set_pulse_density()` pada
   kanal SDM (GPIO26) yang dipacu task audio berprioritas pada Core 1.
   (Jalur `bsp_audio_pcm_write()`/`dac_continuous` tidak dipakai — bentrok I2S0.)
-- Volume user 0–100 %.
+- Volume user 0–100 % (default **0 % = mute**; dinaikkan lewat tombol Vol+/Vol−).
 - **Acceptance**: AGC meregulasi (dua level input menghasilkan keluaran
   dalam ±6 dB) selama gain yang dibutuhkan ≤ `SDR_AGC_GAIN_MAX` (default
   512 = +54 dB). Dengan target 96, **rentang kerja** yang dijanjikan adalah
@@ -193,8 +200,9 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   **segitiga/garis merah** menandai posisi puncak.
 - Skala S1–S9+ **belum** diimplementasikan (lihat §5 Out of Scope) — yang
   dipakai adalah nilai dBFS absolut (0 dBFS = full-scale I/Q).
-- **Acceptance**: nilai dBFS chip puncak berubah ≥ 10 Hz mengikuti sinyal uji
-  dan agree dengan puncak garis spektrum.
+- **Acceptance**: readout frekuensi puncak akurat ±1 bin (±5,86 Hz) dan
+  level dBFS chip puncak mengikuti level sinyal uji (±1 dB), konsisten
+  dengan puncak garis spektrum.
 
 ### FR-11 — Self-Test DSP On-Target (I/Q sintetis, tanpa ADC)
 - Build khusus (`CONFIG_SDR_SELFTEST=y`, default `n`): **ADC DMA tidak pernah
@@ -204,15 +212,21 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Hook produksi yang ditambahkan (aktif di build produksi pun, tetapi tidak
   pernah dipakai): `dsp_chain_process_block()` (blok I/Q eksternal),
   `dsp_chain_set_pcm_sink()` (penangkap PCM), `dsp_chain_set_fs_hz()`
-  (laju sampel nominal). Tidak ada jalur "khusus test" di dalam rantai DSP —
-  hanya pemanggilan yang sama.
+  (laju sampel nominal), `spectrum_set_consume_locked()` +
+  `spectrum_get_db_ex()` (task UI tidak boleh mengambil snapshot saat uji;
+  default produksi = tidak terkunci). Tidak ada jalur "khusus test" di dalam
+  rantai DSP — hanya pemanggilan yang sama.
 - Cakupan: generator (T01), DC removal (T02), NCO offset (T03), spektrum &
   mode bin 1024/2048 (T04–T05), demodulasi USB/LSB + penolakan image
-  (T06–T07b), skala volume (T08), AGC (T09–T10), rasio decimasi (T11),
-  ADC tidak dipakai (T12), kestabilan heap (T13).
+  (T06–T07b), skala volume (T08), AGC + rentang dinamis (T09, T09b, T10),
+  rasio decimasi (T11), ADC tidak dipakai (T12), kestabilan heap (T13).
 - Laporan ke log serial (tag `selftest`) dengan status **PASS / WARN / FAIL**;
   WARN = berfungsi tetapi di luar syarat acceptance (mis. level input di
   bawah lantai AGC) atau hasil pengukuran hanya batas bawah.
+- Setelah suite selesai task masuk **mode demo**: 2 tone sintetis (1 kHz dan
+  −2,5 kHz) + noise tetap dialirkan ke rantai DSP sehingga spektrum,
+  waterfall, dan audio dapat diperiksa visual tanpa RF/ADC. Volume
+  dikembalikan ke nilai `sdr_config` semula.
 - **Acceptance**: seluruh kasus PASS atau WARN (tidak boleh FAIL); tidak ada
   panic/reboot; build produksi (`=n`) tetap berjalan identik.
 
@@ -223,13 +237,13 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 | ID | Persyaratan | Nilai |
 | :--- | :--- | :--- |
 | NFR-1 | Pinning core | DSP di Core 1, UI di Core 0 (LVGL sudah default Core 0) |
-| NFR-2 | Prioritas task | `sdr_rx` = 12, `audio_feed` = 11, LVGL = 4 |
+| NFR-2 | Prioritas task | `sdr_rx` = 12, `audio_feed` = 11, LVGL = 4; build self-test: `selftest` = 12 (Core 1, stack statis 8 KB, menggantikan `sdr_rx`) |
 | NFR-3 | Audio real-time | Sinyal audio **tidak boleh drop**; UI/spektrum boleh drop frame |
 | NFR-4 | Waktu boot ke layar aktif | < 3 detik |
-| NFR-5 | RAM internal terpakai (DSP+UI) | ≤ ~121 KB di atas IDF+LVGL; verifikasi `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`. Terukur di board: free heap **81 988 B** setelah boot, **86 708 B** steady-state |
+| NFR-5 | RAM internal terpakai (DSP+UI) | ≤ ~121 KB di atas IDF+LVGL; verifikasi `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`. Terukur di board: free heap **81 908 B** setelah boot, **86 628 B** steady-state |
 | NFR-6 | PSRAM | Tidak tersedia dan tidak diandalkan |
 | NFR-7 | CPU | 240 MHz, optimasi `-O2` (`CONFIG_COMPILER_OPTIMIZATION_PERF`) |
-| NFR-8 | Stabilitas | 10 menit run tanpa WDT reset, tanpa xrun audio steady-state |
+| NFR-8 | Stabilitas | 10 menit run tanpa WDT reset, tanpa xrun audio steady-state. **Terverifikasi 2026-10-22**: 300 sampel log `sdr_rx` (10 menit), `ovf 0`, `xrun 0`, heap konstan, tanpa panic/WDT |
 | NFR-9 | Tuning parametrik | Semua konstanta runtime lewat `Kconfig.projbuild` / `sdr_config`, bukan hardcode |
 
 ---
@@ -255,7 +269,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 | :--- | :--- | :--- | :--- |
 | M0 | BSP terpasang, UI dasar | Layar + touch hidup; TANPA inisialisasi LDR | `idf.py flash monitor` |
 | M1 | ADC DMA capture | I/Q 48 kHz terukur, DC offset terlihat di log | Log rate + plot host |
-| M2 | Rantai DSP → audio | Tone uji 1 kHz terdengar; USB/LSB berfungsi | Tone injection internal |
+| M2 | Rantai DSP → audio | Tone uji 1 kHz terdengar; USB/LSB berfungsi | Self-test FR-11 (T01–T08) + didengar |
 | M3 | FFT + spectrum + waterfall | ≥20 fps, tonal terlihat | `dsps_view` + visual |
 | M4 | AGC + tuning + polish | Drag/keypad menyetel offset, teks freq akurat | Uji sinyal RF nyata |
 | M5 | Ekstensi (opsional) | CW / squelch / rekam SD | — |

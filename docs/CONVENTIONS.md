@@ -60,8 +60,9 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
   (> 1 KB di stack = salah; pakai heap statis).
 - Tidak mengandalkan PSRAM (nonaktif dan tidak tersedia).
 - Mengukur: tambahkan init-log `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`
-  setelah setup — nilai dicatat di commit/test M3. Nilai terverifikasi F6:
-  free heap setelah boot 81 988 B, steady-state 86 708 B (iris `sdr_rx`).
+  setelah setup — nilai dicatat di commit/test M3. Nilai terverifikasi F6
+  (diperbarui F7): free heap setelah boot 81 908 B, steady-state 86 628 B
+  (iris `sdr_rx`, konstan selama soak 10 menit).
 
 ---
 
