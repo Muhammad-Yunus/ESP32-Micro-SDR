@@ -272,8 +272,8 @@ Catatan desain:
   (self-test T09/T09b/T10 mengukur batas ini).
 - Parameter display (F6): `SDR_FFT_N` (jendela analisis, 1024),
   `SDR_AUDIO_FS_HZ` (12 000 Hz — penentu lebar bin = FS/jumlah bin dan batas
-  span FS/2 = 6 kHz), `SDR_DISPLAY_SPAN_HZ` (span awal ±500 Hz, dapat diubah
-  saat runtime dari Settings modal).
+  span FS/2 = 6 kHz), `SDR_DISPLAY_SPAN_HZ` (span awal ±50 kHz, dapat diubah
+  saat runtime dari Settings modal; efektif di-clamp ke FS/2).
 
 ---
 

@@ -92,7 +92,7 @@ kelompok kontrol yang langsung berlaku (tanpa restart):
 | Kontrol | Nilai | Efek |
 | :--- | :--- | :--- |
 | **FFT bin** | 1024 / 2048 | Lebar bin keluaran spektrum 11,72 → 5,86 Hz/bin (RBW asli tetap 11,7 Hz). Mode 1024 memakai bin genap DFT-2048 — secara matematis identik dengan DFT-1024, tanpa inisialisasi FFT tambahan. |
-| **LO span** | ±250 / ±500 / ±1k / ±2k / ±5k / ±10k Hz | Half-width tampilan spektrum & waterfall. Nilai efektif di-clamp ke FS/2 = 6 kHz (sampler 12 kHz): preset 10k tetap terpilih, readout menampilkan `±6K Hz (max)`. |
+| **LO span** | ±250 / ±500 / ±1k / ±2k / ±5k / ±10k Hz | Half-width tampilan spektrum & waterfall. Nilai efektif di-clamp ke FS/2 = 6 kHz (sampler 12 kHz): preset 10k tetap terpilih, readout menampilkan `±6K Hz (max)`. Default build: **±50 kHz** (kini di-clamp ke ±6 kHz saat boot). |
 
 Perubahan skala juga memperbarui grid vertikal, label sumbu Hz, marker
 puncak, dan **membersihkan waterfall** (baris lama memakai skala sebelumnya).

@@ -154,7 +154,7 @@ nilai default harus identik dengan `firmware/sdkconfig.defaults`:
 CONFIG_SDR_ADC_FS_HZ=48000
 CONFIG_SDR_FFT_N=1024                        # jendela analisis (zero-pad ke 2048)
 CONFIG_SDR_AUDIO_FS_HZ=12000                 # FS post-decimasi → batas span ±6 kHz
-CONFIG_SDR_DISPLAY_SPAN_HZ=500               # span awal, dapat diubah saat runtime
+CONFIG_SDR_DISPLAY_SPAN_HZ=50000             # default build (clamp ke FS/2 saat boot)
 CONFIG_SDR_BFO_HZ=1500
 CONFIG_SDR_WATERFALL_ROWS=60
 CONFIG_SDR_DEFAULT_VOLUME_PCT=0                # default mute, naik lewat Vol+/Vol−

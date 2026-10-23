@@ -15,7 +15,7 @@ config SDR_FFT_N
 
 config SDR_DISPLAY_SPAN_HZ
     int "Default display span (+/- Hz)"
-    default 500
+    default 50000
     help
         Initial half-width of the spectrum/waterfall display around the
         tuned frequency. At runtime the span is changed from the Settings

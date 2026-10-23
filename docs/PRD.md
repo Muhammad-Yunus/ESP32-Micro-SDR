@@ -156,8 +156,8 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   - mode FFT bin **1024** (11,72 Hz/bin) atau **2048** (5,86 Hz/bin); mode
     1024 memakai bin genap DFT-2048 (identik dengan DFT-1024).
   - span LO **±250 / ±500 / ±1k / ±2k / ±5k / ±10k Hz**; nilai efektif
-    dijepit ke FS/2 = 6 kHz (sampler 12 kHz) dan preset 10 kHz tetap
-    terpilih dengan readout nilai efektif.
+    dijepit ke FS/2 = 6 kHz (sampler 12 kHz). Default build **±50 kHz**
+    (di-clamp ke ±6 kHz saat boot / runtime).
 - Grid vertikal, label sumbu Hz, marker puncak dan waterfall mengikuti skala
   aktif; perubahan skala **membersihkan waterfall** (baris lama memakai
   skala sebelumnya).
