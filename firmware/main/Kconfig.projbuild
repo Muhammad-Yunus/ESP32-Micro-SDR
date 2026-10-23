@@ -72,7 +72,7 @@ config SDR_ADC_BLOCK_FRAMES
 
 config SDR_DEFAULT_LO_HZ
     int "Default LO label (Hz)"
-    default 20000000
+    default 7050000
     help
         Visual-only LO frequency label shown in the top bar (the real LO
         is driven by an external Si5351 controller).
