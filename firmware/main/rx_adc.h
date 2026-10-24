@@ -36,3 +36,24 @@ uint32_t rx_adc_measured_fs_hz(void);
 
 /** Hitungan event pool DMA penuh (overrun); 0 pada operasi normal. */
 uint32_t rx_adc_overrun_count(void);
+
+/** Diagnostik raw-12-bit per kanal (jendela 2 s, di-reset otomatis). */
+typedef struct {
+    uint16_t min;            /* raw minimum (0..4095) */
+    uint16_t max;            /* raw maksimum (0..4095) */
+    uint32_t avg;            /* rata-rata raw (0..4095) */
+    uint32_t rms;            /* akar rata-rata kuadrat raw (0..4095) */
+    uint32_t p2p;            /* max − min (0..4095) */
+} rx_adc_diag_chan_t;
+
+typedef struct {
+    rx_adc_diag_chan_t i;    /* CH0 = GPIO36 */
+    rx_adc_diag_chan_t q;    /* CH7 = GPIO35 */
+    uint32_t frames;         /* jumlah sampel raw per kanal pada jendela */
+} rx_adc_diag_t;
+
+/**
+ * Isi `out` dengan statistik raw-12-bit I/Q pada jendela 2 s terakhir.
+ * Dipanggil dari sdr_rx_task (Core 1) saat log diagnostik.
+ */
+void rx_adc_diag_get(rx_adc_diag_t *out);

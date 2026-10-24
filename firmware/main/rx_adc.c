@@ -15,6 +15,7 @@
 #include "rx_adc.h"
 
 #include <string.h>
+#include <math.h>
 
 #include "esp_attr.h"
 #include "esp_check.h"
@@ -84,6 +85,9 @@ static int64_t s_rate_t0_us;
 static bool s_pending_i;
 static float s_pending_i_val;
 
+static void rx_adc_diag_init_window(void);
+static void rx_adc_diag_track(int ch, uint16_t raw12);
+
 static IRAM_ATTR bool rx_adc_pool_ovf_cb(adc_continuous_handle_t handle,
                                         const adc_continuous_evt_data_t *edata,
                                         void *user_data)
@@ -143,8 +147,9 @@ esp_err_t rx_adc_init(void)
     ESP_RETURN_ON_ERROR(adc_continuous_start(s_handle), TAG, "start");
 
     s_rate_t0_us = esp_timer_get_time();
+    rx_adc_diag_init_window();
     ESP_LOGI(TAG, "I/Q DMA: CH0=GPIO36, CH7=GPIO35, %d Hz/kanal (%d Hz agregat), "
-             "atten %u dB, pool %d B, frame %d B",
+              "atten %u dB, pool %d B, frame %d B",
              CONFIG_SDR_ADC_FS_HZ, RX_ADC_AGG_FS_HZ, rcfg.adc_atten_db,
              RX_ADC_POOL_BYTES, RX_ADC_CONV_FRAME_BYTES);
     return ESP_OK;
@@ -180,7 +185,15 @@ size_t rx_adc_read(iq_t *out, size_t max_frames)
             const uint16_t word = (uint16_t)s_raw[off] |
                                   ((uint16_t)s_raw[off + 1] << 8);
             const uint8_t ch = (uint8_t)((word >> 12) & 0x0Fu);
-            const float val = ((float)(word & 0x0FFFu) - 2048.0f) / 2048.0f;
+            const uint16_t raw12 = (uint16_t)(word & 0x0FFFu);
+            const float val = ((float)raw12 - 2048.0f) / 2048.0f;
+
+            /* Diagnostik raw-12-bit per kanal (akumulator statis, murah). */
+            if (ch == RX_ADC_CH_I) {
+                rx_adc_diag_track(0, raw12);
+            } else if (ch == RX_ADC_CH_Q) {
+                rx_adc_diag_track(1, raw12);
+            }
 
             if (ch == RX_ADC_CH_I) {
                 s_pending_i_val = val;
@@ -213,6 +226,82 @@ size_t rx_adc_read(iq_t *out, size_t max_frames)
 uint32_t rx_adc_measured_fs_hz(void)
 {
     return s_fs_hz;
+}
+
+/* Diagnostik raw-12-bit: satu set akumulator per kanal pada jendela 2 s
+ * (sama dengan DSP_DIAG_PERIOD_US di dsp_chain.c). Di-reset otomatis saat
+ * dsp_chain memanggil rx_adc_diag_get(); tanpa malloc, semua di BSS statis. */
+#define RX_DIAG_CH_NUM    2           /* CH0 (I), CH7 (Q) */
+#define RX_DIAG_WINDOW_US 2000000     /* 2 s               */
+
+static uint16_t s_diag_min[RX_DIAG_CH_NUM];
+static uint16_t s_diag_max[RX_DIAG_CH_NUM];
+static uint64_t s_diag_sum[RX_DIAG_CH_NUM];
+static uint64_t s_diag_sum2[RX_DIAG_CH_NUM];  /* sum-of-squares raw12 */
+static uint32_t s_diag_cnt[RX_DIAG_CH_NUM];
+static int64_t  s_diag_t0_us;
+
+static void rx_adc_diag_init_window(void)
+{
+    for (int ch = 0; ch < RX_DIAG_CH_NUM; ch++) {
+        s_diag_min[ch]  = 4095;    /* raw min mulai dari maksimum */
+        s_diag_max[ch]  = 0;       /* raw max mulai dari minimum   */
+        s_diag_sum[ch]  = 0;
+        s_diag_sum2[ch] = 0;
+        s_diag_cnt[ch]  = 0;
+    }
+    s_diag_t0_us = esp_timer_get_time();
+}
+
+static void rx_adc_diag_track(int ch, uint16_t raw)
+{
+    if (raw < s_diag_min[ch]) {
+        s_diag_min[ch] = raw;
+    }
+    if (raw > s_diag_max[ch]) {
+        s_diag_max[ch] = raw;
+    }
+    s_diag_sum[ch]  += raw;
+    s_diag_sum2[ch] += ((uint32_t)raw * (uint32_t)raw);
+    s_diag_cnt[ch]++;
+}
+
+static uint32_t rx_adc_diag_avg(int ch)
+{
+    if (s_diag_cnt[ch] == 0) {
+        return 0;
+    }
+    return (uint32_t)(s_diag_sum[ch] / s_diag_cnt[ch]);
+}
+
+static uint32_t rx_adc_diag_rms(int ch)
+{
+    if (s_diag_cnt[ch] == 0) {
+        return 0;
+    }
+    const uint64_t mean2 = s_diag_sum2[ch] / s_diag_cnt[ch];
+    return (uint32_t)sqrt((double)mean2);
+}
+
+void rx_adc_diag_get(rx_adc_diag_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    for (int ch = 0; ch < RX_DIAG_CH_NUM; ch++) {
+        rx_adc_diag_chan_t *d =
+            (ch == 0) ? &out->i : &out->q;
+        d->min = (uint16_t)s_diag_min[ch];
+        d->max = (uint16_t)s_diag_max[ch];
+        d->avg = rx_adc_diag_avg(ch);
+        d->rms = rx_adc_diag_rms(ch);
+        d->p2p = (uint32_t)((uint16_t)s_diag_max[ch] -
+                             (uint16_t)s_diag_min[ch]);
+    }
+    out->frames = s_diag_cnt[0];   /* pola 2 kanal → cnt sama */
+
+    /* Reset ke jendela berikutnya. */
+    rx_adc_diag_init_window();
 }
 
 uint32_t rx_adc_overrun_count(void)
