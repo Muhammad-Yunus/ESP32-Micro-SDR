@@ -250,7 +250,7 @@ Ukuran RAM terverifikasi di board (ESP32 klasik, tanpa PSRAM):
 | 2 | DC removal | `y[n] = x[n] − x[n−1] + R·y[n−1]`, `R = 0.996` (~30 Hz), per kanal, **sebelum** NCO. **Dilewati pada mode AM** (carrier AM = komponen DC kanal I; carrier dibuang oleh DC-blocker khusus envelope di tahap 5) | 48 kHz |
 | 3 | NCO offset | `I' = I·c + Q·s`, `Q' = Q·c − I·s`, `φ += 2π·f_offset/fs`; sin/cos dari LUT 1024 + interp linear; step per-blok (fase kontinu) | 48 kHz |
 | 4 | LPF kanal + decimasi | Halfband/double-halfband 2,7 kHz, 48→24→12 kHz (`dsps_fir_dec2_f32` / `dsps_fir_f32`), state tersimpan antar blok | 12 kHz |
-| 5 | BFO ke-2 (pemilih sideband) / envelope (AM) | SSB: `I' = I·c + Q·s`, `Q' = Q·c − I·s` dengan `φ_B += 2π·f_BFO/fs`; **USB: `f_BFO = +1500`** (frekuensi turun → sideband atas lolos), **LSB: `f_BFO = −1500`** (frekuensi naik → sideband bawah lolos). AM: `env = sqrt(I² + Q²)` (envelope detection) + DC-blocker envelope buang carrier | 12 kHz |
+| 5 | BFO ke-2 (pemilih sideband) / envelope (AM) / FM discriminator | SSB: `I' = I·c + Q·s`, `Q' = Q·c − I·s` dengan `φ_B += 2π·f_BFO/fs`; **USB: `f_BFO = +1500`** (frekuensi turun → sideband atas lolos), **LSB: `f_BFO = −1500`** (frekuensi naik → sideband bawah lolos). AM: `env = sqrt(I² + Q²)` (envelope detection) + DC-blocker envelope buang carrier. FM: selisih fase antar sampel: `dφ[n] = atan2(I[n]·Q[n−1] − Q[n]·I[n−1], I[n]·I[n−1] + Q[n]·Q[n−1])`, keluaran = `dφ/(2π) · (1/fm_dev_hz) · K` (deviasi `fm_dev_hz` → keluaran unit). **DC blocker tahap 2 dilewati pada mode FM & AM** | 12 kHz |
 | 6 | Audio LPF | FIR ~2,0 kHz pada komponen I hasil mix (band audio 300–2700 terjemah ke ±1200 Hz) | 12 kHz |
 | 7 | AGC + volume + squelch | env attack 5 ms / release 200 ms; `gain = clamp(target/env, 1/64, SDR_AGC_GAIN_MAX)`; smooth; kelipat ×volume; clip ke `int8` (pulse density SDM). **Squelch otomatis** (hanya saat AGC aktif): envelope pra-gain < `target/gain_max` (= lantai AGC, §FR-5) → gerbang output difade ke 0 dalam ~330 ms; sinyal → buka ~3 ms. Mode gain manual tidak digate | 12 kHz |
 
@@ -262,10 +262,17 @@ Catatan desain:
 - **Mode AM (envelope detection)**: pada IQ @12 kHz tahap 5 menghitung
   `env = sqrt(I²+Q²)`. Carrier AM (siaran) berupa komponen DC di kanal I,
   sehingga DC-blocker tahap 2 **dilewati** (agar carrier tetap tersedia);
-  carrier kemudian dibuang oleh DC-blocker khusus envelope
-  (`env − x[n−1] + R·y[n−1]`, tahap 5) sebelum audio LPF. Pengujian self-test
-  T06a memakai AGC aktif karena amplitudo envelope AM kecil terkuantisasi
-  ke 0 pada int8 tanpa penguatan (lihat PRD §6.1 T-AM).
+   carrier kemudian dibuang oleh DC-blocker khusus envelope
+   (`env − x[n−1] + R·y[n−1]`, tahap 5) sebelum audio LPF. Pengujian self-test
+   T06a memakai AGC aktif karena amplitudo envelope AM kecil terkuantisasi
+   ke 0 pada int8 tanpa penguatan (lihat PRD §6.1 T-AM).
+- **Mode FM (quadrature discriminator)**: tahap 5 menghitung selisih fase
+  antar sampel berurutan: `dφ = atan2(I[n]·Q[n−1] − Q[n]·I[n−1], I[n]·I[n−1]
+  + Q[n]·Q[n−1])`. Keluaran = `dφ / (2π) · (1/fm_dev_hz)` sehingga deviasi
+  `fm_dev_hz` (default ±5 kHz, `CONFIG_SDR_FM_DEV_HZ`) menghasilkan keluaran
+  ±1.0 (skala penuh `int8` via AGC). Carrier FM tanpa modulasi menghasilkan
+  `dφ ≈ 0` (keluaran ≈ 0). DC blocker tahap 2 dilewati (carrier FM = DC kanal
+  I, identik AM). Self-test T07c menguji carrier FM + modulasi 1 kHz.
 - Semua operasi per-blok (vector), bukan per-sampel panggilan library — untuk
   cache & pipeline.
 - Implementasi (F5, `dsp_chain.c`): LUT sin 1024 + interpolasi linear (cos =
@@ -277,7 +284,8 @@ Catatan desain:
 - Parameter tahap §6 dikumpulkan di Kconfig (NFR-9): `SDR_DC_POLE_R`,
   `SDR_CH_LPF_HZ`, `SDR_AUDIO_LPF_HZ`, `SDR_AGC_TARGET` (0 = AGC off),
   `SDR_AGC_ATTACK_MS`, `SDR_AGC_RELEASE_MS`, `SDR_AGC_GAIN_MAX` (batas gain
-  linear, default 512 = +54 dB); override runtime `agc_target` lewat
+   linear, default 512 = +54 dB), `SDR_FM_DEV_HZ` (deviasi FM, default 5000);
+   override runtime `agc_target` lewat
   `sdr_config`. Target AGC hanya tercapai bila level input ≥ target/gain_max
   (self-test T09/T09b/T10 mengukur batas ini).
 - Parameter display (F6): `SDR_FFT_N` (jendela analisis, 1024),

@@ -32,6 +32,8 @@ uint8_t sdr_config_default_mode(void)
     return SDR_MODE_AM;
 #elif CONFIG_SDR_DEFAULT_MODE_LSB
     return SDR_MODE_LSB;
+#elif CONFIG_SDR_DEFAULT_MODE_FM
+    return SDR_MODE_FM;
 #else
     return SDR_MODE_USB;
 #endif
@@ -118,6 +120,8 @@ void sdr_config_set_mode(uint8_t mode)
         s_cfg.mode = SDR_MODE_LSB;
     } else if (mode == SDR_MODE_AM) {
         s_cfg.mode = SDR_MODE_AM;
+    } else if (mode == SDR_MODE_FM) {
+        s_cfg.mode = SDR_MODE_FM;
     } else {
         s_cfg.mode = SDR_MODE_USB;
     }
@@ -131,6 +135,8 @@ void sdr_config_toggle_mode(void)
         s_cfg.mode = SDR_MODE_LSB;
     } else if (s_cfg.mode == SDR_MODE_LSB) {
         s_cfg.mode = SDR_MODE_AM;
+    } else if (s_cfg.mode == SDR_MODE_AM) {
+        s_cfg.mode = SDR_MODE_FM;
     } else {
         s_cfg.mode = SDR_MODE_USB;
     }

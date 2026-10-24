@@ -620,6 +620,69 @@ static void st_test_am_envelope(void)
            m1, (unsigned)s_pcm_len, r1, st_peak_abs(s_pcm, s_pcm_len));
 }
 
+/* T07c - FM narrowband demodulasi (FR-4b): carrier FM (DC kanal I) +
+ * deviasi frekuensi sinusoidal 500 Hz -> keluaran discriminator harus
+ * mengandung komponen 500 Hz. Sinyal FM baseband sintetis:
+ *   I[n] = cos(phi[n]), Q[n] = sin(phi[n])
+ *   phi[n] = (2*pi*dev_hz / mod_hz) * sin(2*pi*mod_hz*n/fs)
+ * di mana dev_hz = deviasi puncak, mod_hz = frekuensi modulasi. */
+static void st_test_fm_demod(void)
+{
+    const float dev_hz = 1000.0f;           /* deviasi uji 1 kHz             */
+    const float mod_hz = ST_AUDIO_HZ;       /* 500 Hz                        */
+    const float fs = (float)CONFIG_SDR_ADC_FS_HZ;
+    float phi = 0.0f;
+    const float dev_index = (2.0f * 3.14159265358979f * dev_hz) / mod_hz;
+    const float mod_step = 2.0f * 3.14159265358979f * mod_hz / fs;
+    float mod_phase = 0.0f;
+
+    st_prepare(SDR_MODE_FM, 100, CONFIG_SDR_AGC_TARGET);
+
+    /* Feed FM synthetic signal directly to dsp_chain.
+     * AGC on so that the small discriminator output is amplified. */
+    for (size_t blk = 0; blk < ST_WARMUP_BLOCKS; blk++) {
+        for (size_t k = 0; k < ST_BLOCK_FRAMES; k++) {
+            /* Update FM modulating phase (500 Hz tone) */
+            mod_phase += mod_step;
+            /* Instantaneous FM frequency deviation (Hz):
+             * dev(t) = dev_hz * cos(mod_phase)
+             * Phase integral of deviation:
+             *   phi_inst = dev_index * sin(mod_phase)
+             * I = cos(phi_inst), Q = sin(phi_inst) */
+            phi = dev_index * sinf(mod_phase);
+            s_frames[k].i = cosf(phi);
+            s_frames[k].q = sinf(phi);
+        }
+        /* Feed block: need to inject I/Q directly into dsp chain */
+        dsp_chain_process_block(s_frames, ST_BLOCK_FRAMES);
+    }
+    /* Now capture */
+    st_capture_end();
+    for (size_t blk = 0; blk < ST_CAPTURE_BLOCKS; blk++) {
+        for (size_t k = 0; k < ST_BLOCK_FRAMES; k++) {
+            mod_phase += mod_step;
+            phi = dev_index * sinf(mod_phase);
+            s_frames[k].i = cosf(phi);
+            s_frames[k].q = sinf(phi);
+        }
+        dsp_chain_process_block(s_frames, ST_BLOCK_FRAMES);
+    }
+    s_capture_on = false;
+
+    const float mag500 = st_goertzel(s_pcm, s_pcm_len, mod_hz,
+                                      (float)CONFIG_SDR_AUDIO_FS_HZ);
+    const bool ok = (mag500 > 2.0f);
+
+    char m1[16];
+    st_f1(mag500, m1, sizeof(m1));
+    char r1[16];
+    st_f1(st_rms(s_pcm, s_pcm_len), r1, sizeof(r1));
+    st_add("T07c", "FM narrowband demod (FR-4b)",
+           ok ? ST_PASS : ST_FAIL,
+           "Goertzel %.0f Hz = %s | rms %s (deviasi %.0f Hz)",
+           mod_hz, m1, r1, dev_hz);
+}
+
 /* T08 - volume: 0% harus diam, 50% harus separuh dari 100%. */
 static void st_test_volume(void)
 {
@@ -937,6 +1000,7 @@ void selftest_task(void *arg)
     st_test_demod(SDR_MODE_USB, "T06", &usb_sign);
     st_test_demod(SDR_MODE_LSB, "T07", &lsb_sign);
     st_test_am_envelope();          /* T06a - AM envelope */
+    st_test_fm_demod();            /* T07c - FM narrowband */
     s_pass_sign = usb_sign ? usb_sign : lsb_sign;
 
     if (usb_sign != 0 && lsb_sign != 0 && usb_sign == lsb_sign) {

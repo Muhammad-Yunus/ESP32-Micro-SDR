@@ -8,7 +8,7 @@
  *   2. DC removal  y = x − x1 + R·y1 (per kanal)     48 kHz
  *   3. NCO offset  rotasi kompleks, LUT 1024         48 kHz
  *   4. LPF kanal + decimasi 48→24→12 (dsps_fird)     12 kHz
- *   5. BFO ke-2 (USB/LSB)                            12 kHz
+ *   5. BFO (USB/LSB) / envelope (AM) / FM disc       12 kHz
  *   6. audio LPF ~2,0 kHz (dsps_fir)                 12 kHz
  *   7. AGC + volume → int8 → audio_out_push          12 kHz
  *
@@ -278,17 +278,21 @@ static size_t dsp_process_block(const iq_t *in, size_t frames)
     }
 
     /* Tahap 2+3 (satu loop, vektor per blok): DC block lalu rotasi NCO.
-     * AM: DC blocker DILUPLI (carrier AM = komponen DC kanal I) — envelope
-     * |I+jQ| butuh carrier; DC carrier dibuang oleh DC block di envelope
-     * (tahap 5). SSB: DC blocker normal per kanal. */
-    const bool am_mode = (cfg.mode == SDR_MODE_AM);
+     * AM/FM: DC blocker DILEWATI (carrier = komponen DC kanal I) —
+     * AM: envelope |I+jQ| butuh carrier; DC carrier dibuang oleh
+     *     DC block khusus envelope di tahap 5.
+     * FM:  carrier FM = DC kanal I; dibuang oleh DC blocker
+     *     discriminator di tahap 5 (selisih fase → DC hilang otomatis).
+     * SSB: DC blocker normal per kanal. */
+    const bool skip_dc_block =
+        (cfg.mode == SDR_MODE_AM) || (cfg.mode == SDR_MODE_FM);
     const float step_nco = (float)cfg.nco_offset_hz / (float)fs;
     float ph = s_nco_phase;
     for (size_t k = 0; k < n; k++) {
         const float xi = in[k].i;
         const float xq = in[k].q;
         float di, dq;
-        if (am_mode) {
+        if (skip_dc_block) {
             di = xi;
             dq = xq;
         } else {
@@ -341,7 +345,8 @@ static size_t dsp_process_block(const iq_t *in, size_t frames)
     }
 
     /* Tahap 5: demodulasi by mode.
-     * SSB (USB/LSB): BFO ke-2. AM: envelope detection (|I+jQ|), tanpa BFO. */
+     * SSB (USB/LSB): BFO ke-2. AM: envelope (|I+jQ|).
+     * FM: quadrature discriminator (selisih fase atan2). */
     const float fs12 = (float)fs / 4.0f;
     if (cfg.mode == SDR_MODE_AM) {
         for (int k = 0; k < n12; k++) {
@@ -365,6 +370,32 @@ static size_t dsp_process_block(const iq_t *in, size_t frames)
             s_f12_i[k] = denv;
         }
         /* Tahap 6: audio LPF ~2,0 kHz pada envelope (mode AM). */
+        dsps_fir_f32(&s_fir_aud, s_f12_i, s_audio_f, n12);
+    } else if (cfg.mode == SDR_MODE_FM) {
+        /* FM: quadrature discriminator — selisih fase atan2 antar sampel.
+         * dphi[n] = atan2(I[n]*Q[n-1] - Q[n]*I[n-1],
+         *                 I[n]*I[n-1] + Q[n]*Q[n-1])
+         *
+         * Skala keluaran: dphi/(2*pi) = deviasi frekuensi instans (Hz,
+         * relatif fs12).  Bagi fm_dev_hz sehingga deviasi penuh menghasilkan
+         * keluaran ±1.0 (skala int8 penuh, ter-regulasi AGC).
+         * Carrier FM tanpa modulasi → dphi≈0 → keluaran ≈0.
+         * FM uses IQ source (both I and Q channels from the input pair);
+         * SDR_SRC_I / SDR_SRC_Q are irrelevant for FM. */
+        const float fm_scale = fs12 / (float)CONFIG_SDR_FM_DEV_HZ;
+        const float inv_2pi  = 1.0f / (2.0f * DSP_PI);
+        for (int k = 1; k < n12; k++) {
+            const float ip = s_f12_i[k - 1];
+            const float qp = s_f12_q[k - 1];
+            const float ic = s_f12_i[k];
+            const float qc = s_f12_q[k];
+            const float cross = ic * qp - qc * ip;
+            const float dot   = ic * ip + qc * qp;
+            const float dphi  = atan2f(cross, dot) * inv_2pi;
+            s_f12_i[k] = dphi * fm_scale;
+        }
+        s_f12_i[0] = 0.0f;
+        /* Tahap 6: audio LPF ~2,0 kHz pada keluaran discriminator. */
         dsps_fir_f32(&s_fir_aud, s_f12_i, s_audio_f, n12);
     } else {
         const float bfo_hz =
@@ -593,6 +624,17 @@ void sdr_rx_task(void *arg)
                      audio_out_xrun_count(),
                      (aud - s_aud_prev) / (DSP_DIAG_PERIOD_US / 1000000),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+
+            /* Diagnostik raw-12-bit (avg/rms/p2p/min/max) per kanal. */
+            rx_adc_diag_t rd;
+            rx_adc_diag_get(&rd);
+            ESP_LOGI(TAG,
+                     "RAW12 I: avg %u rms %u p2p %u [min %u max %u] | "
+                     "Q: avg %u rms %u p2p %u [min %u max %u] | n %" PRIu32,
+                     rd.i.avg, rd.i.rms, rd.i.p2p, rd.i.min, rd.i.max,
+                     rd.q.avg, rd.q.rms, rd.q.p2p, rd.q.min, rd.q.max,
+                     rd.frames);
+
             s_aud_prev = aud;
             s_sum_i = 0.0;
             s_sum_q = 0.0;

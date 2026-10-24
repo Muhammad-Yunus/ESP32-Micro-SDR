@@ -21,6 +21,7 @@ extern "C" {
 #define SDR_MODE_USB 0
 #define SDR_MODE_LSB 1
 #define SDR_MODE_AM  2
+#define SDR_MODE_FM  3
 
 #define SDR_SRC_IQ   0
 #define SDR_SRC_Q    1
@@ -36,7 +37,7 @@ typedef struct {
     int32_t lo_label_hz;    /* visual label only; real LO is external      */
     int32_t nco_offset_hz;  /* -CONFIG_SDR_NCO_LIMIT_HZ .. +limit, tuning  */
     int32_t nco_step_hz;    /* 10/50/100/500/1k/10k/100k/1M                */
-    uint8_t mode;           /* SDR_MODE_USB / SDR_MODE_LSB / SDR_MODE_AM  */
+    uint8_t mode;           /* SDR_MODE_USB / LSB / AM / FM */
     uint8_t volume_pct;     /* 0..100                                      */
     uint8_t agc_target;     /* AGC target level (used from F5)             */
     bool agc_enabled;       /* AGC on/off; when off, manual gain is used   */

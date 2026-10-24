@@ -132,7 +132,29 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - **Acceptance**: sinyal uji tone pada satu sisi terdengar jelas pada mode yang
   benar dan melemah ≥ 25 dB (image sideband) pada mode yang salah.
   Mode AM: sinyal modulasi (carrier DC + tone) menghasilkan komponen
-  frekuensi modulasi di keluaran audio (diukur Goertzel, self-test T06a).
+   frekuensi modulasi di keluaran audio (diukur Goertzel, self-test T06a).
+
+### FR-4b — Demodulasi FM (narrowband, VHF/UHF)
+- Struktur **quadrature discriminator** (selisih fase antar sampel):
+  1. LPF kanal 2,7 kHz + decimasi halfband 48→24→12 kHz (tahap 4,
+     identik dengan SSB/AM).
+  2. **Demodulasi FM** (tahap 5, menggantikan BFO/envelope):
+     - Hitung selisih fase antar sampel berurutan:
+       `dphi[n] = atan2(I[n]*Q[n-1] - Q[n]*I[n-1], I[n]*I[n-1] + Q[n]*Q[n-1])`
+     - Keluaran discriminator = `dphi / (2*pi)` (deviasi frekuensi
+       instans dalam Hz, relatif terhadap fs12).
+     - Skala keluaran: `dphi_hz * (fm_scale / CONFIG_SDR_FM_DEV_HZ)`
+       agar deviasi `CONFIG_SDR_FM_DEV_HZ` (default ±5 kHz) menghasilkan
+       keluaran audio yang ter-regulasi AGC.
+  3. Audio LPF ~2,0 kHz pada keluaran discriminator (tahap 6, sama SSB/AM).
+- **DC blocker tahap 2 dilewati** pada mode FM (carrier FM = komponen DC
+  kanal I, identik dengan AM).
+- **Deviasi FM** default = ±5 kHz (`CONFIG_SDR_FM_DEV_HZ`).
+- Toggle mode bar bawah menjadi **USB → LSB → AM → FM → USB …**
+- **Acceptance**: carrier FM + modulasi 1 kHz (deviasi 1 kHz,
+  `fm_dev_hz = 5000`) menghasilkan komponen 1 kHz di keluaran audio
+  (Goertzel, self-test T07). Signal FM tanpa modulasi (carrier murni)
+  menghasilkan keluaran ≈ 0 (DC blocker discriminator).
 
 ### FR-5 — AGC + Volume + Audio Out
 - AGC envelope: deteksi peak/RMS jangka pendek; attack ~5 ms, release ~200 ms;
@@ -237,7 +259,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   rantai DSP — hanya pemanggilan yang sama.
 - Cakupan: generator (T01), DC removal (T02), NCO offset (T03), spektrum &
   mode bin 1024/2048 (T04–T05), demodulasi USB/LSB + penolakan image
-  (T06–T07b), AM envelope detection (T06a), skala volume (T08),
+   (T06–T07b), AM envelope detection (T06a), FM demod (T07c), skala volume (T08),
   AGC + rentang dinamis (T09, T09b, T10), rasio decimasi (T11),
   ADC tidak dipakai (T12), kestabilan heap (T13).
 - Laporan ke log serial (tag `selftest`) dengan status **PASS / WARN / FAIL**;
@@ -271,7 +293,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 ## 5. Out of Scope (v1) — JANGAN diimplementasikan tanpa revisi PRD
 
 - Kontrol Si5351 / VFO dari MCU (LO di luar).
-- Mode FM, CW, digital mode (AM sudah masuk v1, FR-4).
+- Mode CW, digital mode (AM & FM sudah masuk v1, FR-4/FR-4b).
 - Perekaman ke microSD (BSP sudah mendukung mount — cadangan M5).
 - DAC I2S eksternal (pin 21/25 tersedia — cadangan kualitas audio).
 - WiFi / Bluetooth / jaringan apa pun (nonaktif; hemat RAM & gangguan ADC).

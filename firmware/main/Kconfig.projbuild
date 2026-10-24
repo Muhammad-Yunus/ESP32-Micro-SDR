@@ -90,6 +90,9 @@ choice SDR_DEFAULT_MODE
     config SDR_DEFAULT_MODE_AM
         bool "AM (envelope detection)"
 
+    config SDR_DEFAULT_MODE_FM
+        bool "FM (narrowband, VHF/UHF)"
+
 endchoice
 
 config SDR_LO_MAX_HZ
@@ -195,6 +198,16 @@ config SDR_AUDIO_LPF_HZ
     help
         FIR low-pass on the BFO I component at 12 kHz (stage 6): final
         audio bandwidth before AGC.
+
+config SDR_FM_DEV_HZ
+    int "FM narrowband deviation (Hz)"
+    default 5000
+    help
+        Full-peak FM frequency deviation for narrowband VHF/UHF signals
+        (PMR, walkie-talkie, NOAA weather, etc.). The quadrature
+        discriminator scales output so that this deviation maps to the
+        full-scale int8 range via AGC. Typical values: 2500 (NBFM 2.5 kHz
+        dev, e.g. NOAA WX), 5000 (FM narrowband VHF/UHF).
 
 config SDR_AGC_TARGET
     int "AGC target level (0 = AGC off)"

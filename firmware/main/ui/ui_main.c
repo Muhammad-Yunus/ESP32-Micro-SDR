@@ -181,6 +181,8 @@ static void update_freq_bar(void)
         mode = "LSB";
     } else if (cfg.mode == SDR_MODE_AM) {
         mode = "AM";
+    } else if (cfg.mode == SDR_MODE_FM) {
+        mode = "FM";
     }
     fmt_hz_dot(lo, sizeof(lo), (uint32_t)cfg.lo_label_hz);
     fmt_offset_bracket(off, sizeof(off), cfg.nco_offset_hz);
