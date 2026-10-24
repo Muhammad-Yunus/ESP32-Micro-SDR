@@ -51,8 +51,11 @@ static const char *TAG = "audio_out";
 /* Amplitudo tone: 90 = batas "lebih baik randomness" (driver sdm.h); skala
    volume_pct dari sdr_config. Dibagi 10 dari skala penuh agar level di
    osiloskop/speaker tidak terlalu kuat (bring-up). */
-#define AUDIO_TONE_BASE_AMP 9.0f
-#define AUDIO_TONE_RATE_MASK 4095        /* penyesuaian step tiap 4096 write */
+/* Tabel sinus int8 skala penuh (256 titik) untuk tone sintetis: kualitas
+ * jauh lebih baik dari sinf() per-sampel (akurat setengah-precision di
+ * ESP32 klasik) dan tanpa pembagian floating di loop. */
+#define AUDIO_SIN_LOG2   8
+#define AUDIO_SIN_LUT_N  (1u << AUDIO_SIN_LOG2)
 
 static sdm_channel_handle_t s_chan;
 static QueueHandle_t s_audio_q;   /* int8_t* — blok penuh siap diputar    */
@@ -63,6 +66,21 @@ static volatile bool s_ready;
 static volatile uint32_t s_xrun;
 static volatile uint32_t s_updates;   /* total update density (diagnostik) */
 
+static int8_t s_sin_lut[AUDIO_SIN_LUT_N];  /* -127..127 skala penuh         */
+
+/* State tone sintetis (persist antar-dispatch; fase mulus saat tone<->blok). */
+static uint32_t s_tone_phase;      /* akumulator fase: 1 siklus = 2^32    */
+static int64_t  s_tone_prev_us;    /* waktu riil write densitas terakhir   */
+static int64_t  s_tone_epoch_us;   /* titik acuan pacing absolut          */
+static int64_t  s_tone_upd_idx;    /* indeks sampel pacing                */
+static bool     s_tone_started;
+
+/* State pemutaran blok dibawa antar-dispatch (fase mulus saat tone<->blok). */
+static int64_t s_blk_sub_idx;
+static int64_t s_blk_epoch_us;
+static bool    s_blk_started;
+static int8_t  s_blk_prev_dens;
+
 static int8_t *audio_pool_pop(void)
 {
     int8_t *blk = NULL;
@@ -70,6 +88,18 @@ static int8_t *audio_pool_pop(void)
         return NULL;
     }
     return blk;
+}
+
+/* Bangun tabel sinus int8 skala penuh (256 titik, -127..127) SEKALI saat
+ * init — memakai sinf() float hanya di sini, bukan di loop pemutar. */
+static void audio_build_sin_lut(void)
+{
+    const float two_pi = 2.0f * (float)M_PI;
+    for (uint32_t i = 0; i < AUDIO_SIN_LUT_N; i++) {
+        s_sin_lut[i] = (int8_t)(lroundf(127.0f *
+                                        sinf(two_pi * (float)i /
+                                              (float)AUDIO_SIN_LUT_N)));
+    }
 }
 
 esp_err_t audio_out_init(void)
@@ -103,6 +133,13 @@ esp_err_t audio_out_init(void)
     s_asm_len = 0;
     s_xrun = 0;
     s_updates = 0;
+
+    audio_build_sin_lut();
+    s_tone_phase = 0;
+    s_tone_prev_us = 0;
+    s_tone_epoch_us = 0;
+    s_tone_upd_idx = 0;
+    s_tone_started = false;
 
     ESP_RETURN_ON_ERROR(sdm_channel_enable(s_chan), TAG, "enable");
 
@@ -178,100 +215,133 @@ static inline void audio_wait_until(int64_t deadline_us)
     }
 }
 
-/* Mode test: sinus kontinu-fasa tanpa pacing (free-run). Rate write aktual
-   diukur tiap 4096 write dan step disetel ulang, sehingga frekuensi output
-   = target meski CPU dibebani rx task — untuk tone tinggi (mis. 100 kHz)
-   pacing berbasis task tidak sanggup (butuh periode ~2 us). */
-static void audio_tone_loop(void)
+/* Mode test: tone sintetis DDS (akumulator fase int32, 1 siklus = 2^32) +
+ * LUT 256 titik dengan interpolasi linear. Fase maju dari WAKTU NYATA
+ * (esp_timer) x hz, bukan dari jumlah write — jadi frekuensi EXAK di preset
+ * mana pun (250 Hz..100 kHz) & tetap akurat meski sdr_rx_task (prio 12)
+ * menunda audio task sesaat. Pacing deadline memakai rumus (idx*1e6)/rate
+ * (bukan 1e6/rate yang ter-truncate → dulu melar 48k jadi 50k). */
+#define AUDIO_TONE_BATCH   64
+/* Tone diagnostik mengikuti VOLUME (Vol+/Vol−): amp = ±127*vol/100
+ * (vol 0 = senyap). */
+#define AUDIO_TONE_FULL    127   /* skala penuh int8 saat volume 100 %    */
+#define AUDIO_TONE_LUT_FS  127   /* skala penuh tabel sinus int8          */
+
+static void audio_tone_batch(uint32_t hz, uint8_t vol_pct)
 {
-    const float target = (float)CONFIG_SDR_AUDIO_TONE_HZ;
-    const float two_pi = 2.0f * (float)M_PI;
+    const int32_t amp = (AUDIO_TONE_FULL * (int)vol_pct) / 100;
+    const int64_t now = esp_timer_get_time();
+    const int64_t block_us =
+        (int64_t)AUDIO_TONE_BATCH * 1000000 / AUDIO_UPD_HZ;
+    /* Re-epoch bila task sempat tertunda > satu batch (toggle on/off sering). */
+    if (!s_tone_started ||
+        now > s_tone_epoch_us + s_tone_upd_idx * (1000000 / AUDIO_UPD_HZ)
+            + block_us) {
+        s_tone_epoch_us = now;
+        s_tone_upd_idx = 0;
+        s_tone_prev_us = now;      /* hindari lompatan fase setelah preempsi */
+        s_tone_started = true;
+    }
 
-    sdr_config_t cfg;
-    sdr_config_get(&cfg);
-    float amp = AUDIO_TONE_BASE_AMP * (float)cfg.volume_pct / 100.0f;
+    for (int i = 0; i < AUDIO_TONE_BATCH; i++) {
+        /* Deadline absolut per update tanpa truncation: (idx*1e6)/rate. */
+        const int64_t dl =
+            s_tone_epoch_us + (s_tone_upd_idx + 1) * 1000000 / AUDIO_UPD_HZ;
+        audio_wait_until(dl);
 
-    float phase = 0.0f;
-    float step = two_pi * target / (float)AUDIO_UPD_HZ;   /* tebakan awal */
-    uint32_t n = 0;
-    int64_t tmark_us = esp_timer_get_time();
+        /* Fase maju dari WAKTU NYATA (robust terhadap preempsi Core-1):
+         * inc = 2^32 * hz/1e6 * dt_us (mod 2^32, wrap aman utk uint32). */
+        const int64_t now_w = esp_timer_get_time();
+        const int64_t dt_us = now_w - s_tone_prev_us;
+        s_tone_prev_us = now_w;
+        if (dt_us > 0) {
+            /* inc = 2^32 * hz * dt_us / 1e6 (seluruh dalam 64-bit, lalu mod 2^32
+             * via wrap uint32). Frekuensi EXAK meski task sempat tertunda. */
+            const uint64_t num =
+                (uint64_t)4294967296ULL * (uint64_t)hz * (uint64_t)dt_us;
+            s_tone_phase += (uint32_t)(num / 1000000ULL);
+        }
 
-    for (;;) {
-        sdm_channel_set_pulse_density(s_chan, (int8_t)(sinf(phase) * amp));
+        /* Indeks LUT = 8 bit atas fase; fraksi dalam sel = 16 bit bawah
+         * (dipakai utk interpolasi linear) → waveform sinus bersih. */
+        const uint32_t ph = s_tone_phase;
+        const uint32_t idx = ph >> 24;
+        const uint32_t f16 = (ph & 0xFFFFFFu) >> 8;
+        const int32_t a = s_sin_lut[idx & (AUDIO_SIN_LUT_N - 1)];
+        const int32_t b = s_sin_lut[(idx + 1) & (AUDIO_SIN_LUT_N - 1)];
+        const int32_t lut = a + (((b - a) * (int32_t)f16 + 32767) >> 16);
+
+        sdm_channel_set_pulse_density(
+            s_chan, (int8_t)(lut * amp / AUDIO_TONE_LUT_FS));
         s_updates++;
-
-        phase += step;
-        while (phase >= two_pi) {
-            phase -= two_pi;
-        }
-
-        if ((++n & AUDIO_TONE_RATE_MASK) == 0) {
-            const int64_t dt = esp_timer_get_time() - tmark_us;
-            if (dt > 0) {
-                step = two_pi * target * (float)dt / 4096.0e6f;
-            }
-            tmark_us = esp_timer_get_time();
-
-            sdr_config_get(&cfg);
-            amp = AUDIO_TONE_BASE_AMP * (float)cfg.volume_pct / 100.0f;
-        }
+        s_tone_upd_idx++;
     }
 }
 
-/* Mode produksi: putar blok dari audio_q; density = interpolasi linear x4
-   antara sampel berurutan (dibawa antar blok agar fase mulus). */
-static void audio_block_loop(void)
+/* Mode produksi: putar SATU blok dari audio_q; density = interpolasi linear x4
+ * antar sampel berurutan (state dibawa antar blok untuk fase mulus). */
+static void audio_block_one(void)
 {
-    int64_t sub_idx = 0;
-    int64_t epoch_us = esp_timer_get_time();
-    bool started = false;
-    int8_t prev_density = 0;
+    int8_t *blk = NULL;
+    if (xQueueReceive(s_audio_q, &blk, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
 
-    for (;;) {
-        int8_t *blk = NULL;
-        if (xQueueReceive(s_audio_q, &blk, portMAX_DELAY) != pdTRUE) {
-            continue;
+    const int64_t block_us =
+        (int64_t)AUDIO_SUB_BLOCK * 1000000 / AUDIO_UPD_HZ;
+    const int64_t now = esp_timer_get_time();
+
+    /* Antrean sempat kosong lebih lama dari satu blok (atau baru mulai)
+       → mulai epoch dari "now"; jangan mengejar ketinggalan. */
+    if (!s_blk_started ||
+        now - (s_blk_epoch_us + s_blk_sub_idx * 1000000 / AUDIO_UPD_HZ) > block_us) {
+        s_blk_epoch_us = now;
+        s_blk_sub_idx = 0;
+        s_blk_started = true;
+    }
+
+    for (size_t i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
+        const int8_t cur = blk[i];
+        for (int k = 1; k <= AUDIO_DENS_MULT; k++, s_blk_sub_idx++) {
+            audio_wait_until(
+                s_blk_epoch_us + (s_blk_sub_idx + 1) * 1000000 / AUDIO_UPD_HZ);
+            const int8_t dens =
+                s_blk_prev_dens +
+                (int16_t)((cur - s_blk_prev_dens) * k) / AUDIO_DENS_MULT;
+            sdm_channel_set_pulse_density(
+                s_chan, dens / CONFIG_SDR_AUDIO_SCALE_DIV);
+            s_updates++;
         }
+        s_blk_prev_dens = cur;
+    }
 
-        const int64_t block_us =
-            (int64_t)AUDIO_SUB_BLOCK * 1000000 / AUDIO_UPD_HZ;
-        const int64_t now = esp_timer_get_time();
-
-        /* Antrean sempat kosong lebih lama dari satu blok (atau baru mulai)
-           → mulai epoch dari "now"; jangan mengejar ketinggalan. */
-        if (!started ||
-            now - (epoch_us + sub_idx * 1000000 / AUDIO_UPD_HZ) > block_us) {
-            epoch_us = now;
-            sub_idx = 0;
-            started = true;
-        }
-
-        for (size_t i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
-            const int8_t cur = blk[i];
-            for (int k = 1; k <= AUDIO_DENS_MULT; k++, sub_idx++) {
-                audio_wait_until(
-                    epoch_us + (sub_idx + 1) * 1000000 / AUDIO_UPD_HZ);
-                const int8_t dens =
-                    prev_density +
-                    (int16_t)((cur - prev_density) * k) / AUDIO_DENS_MULT;
-                sdm_channel_set_pulse_density(s_chan, dens);
-                s_updates++;
-            }
-            prev_density = cur;
-        }
-
-        if (xQueueSend(s_free_q, &blk, 0) != pdTRUE) {
-            s_xrun++; /* pool tidak konsisten — tidak boleh terjadi */
-        }
+    if (xQueueSend(s_free_q, &blk, 0) != pdTRUE) {
+        s_xrun++; /* pool tidak konsisten — tidak boleh terjadi */
     }
 }
 
+/* Dispatcher: pilih tone-sintetis vs blok-antrean per-runtime dari sdr_config
+ * (toggle Test di gear). Tone menyisihkan jalur antrean (blok tetap di-push
+ * DSP tapi tidak di-drain → speaker hanya mendengar tone). */
 void audio_feed_task(void *arg)
 {
     (void)arg;
 
-    if (CONFIG_SDR_AUDIO_TONE_HZ > 0) {
-        audio_tone_loop();
+    sdr_config_t cfg;
+    sdr_config_get(&cfg);
+
+    for (;;) {
+        uint16_t tone_hz = cfg.test_tone_hz;
+        if (tone_hz == 0) {
+            tone_hz = CONFIG_SDR_AUDIO_TONE_HZ; /* fallback bring-up build */
+        }
+
+        if (tone_hz > 0) {
+            audio_tone_batch(tone_hz, cfg.volume_pct);
+        } else {
+            audio_block_one();
+        }
+
+        sdr_config_get(&cfg);
     }
-    audio_block_loop();
 }

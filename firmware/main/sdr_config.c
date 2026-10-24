@@ -26,18 +26,35 @@ static const int32_t s_span_opts[] = {
 };
 #define SDR_SPAN_COUNT (sizeof(s_span_opts) / sizeof(s_span_opts[0]))
 
-void sdr_config_init(void)
+uint8_t sdr_config_default_mode(void)
+{
+#if CONFIG_SDR_DEFAULT_MODE_AM
+    return SDR_MODE_AM;
+#elif CONFIG_SDR_DEFAULT_MODE_LSB
+    return SDR_MODE_LSB;
+#else
+    return SDR_MODE_USB;
+#endif
+}
+
+    void sdr_config_init(void)
 {
     portENTER_CRITICAL(&s_lock);
     s_cfg = (sdr_config_t) {
         .lo_label_hz   = CONFIG_SDR_DEFAULT_LO_HZ,
         .nco_offset_hz = 0,
         .nco_step_hz   = 100,
-        .mode          = SDR_MODE_USB,
+        .mode          = sdr_config_default_mode(),
         .volume_pct    = CONFIG_SDR_DEFAULT_VOLUME_PCT,
         .agc_target    = CONFIG_SDR_AGC_TARGET,
+        .agc_enabled   = false,
+        .manual_gain_db = CONFIG_SDR_DEFAULT_GAIN_DB,
+        .src           = SDR_SRC_Q,
+        .lpf_hz        = CONFIG_SDR_DEFAULT_AUDIO_LPF_HZ,
+        .adc_atten_db  = CONFIG_SDR_DEFAULT_ADC_ATTEN_DB,
         .lo_i          = 0,
         .lo_q          = 0,
+        .test_tone_hz  = 0,
         .fft_bins      = 2048,
         .span_half_hz  = CONFIG_SDR_DISPLAY_SPAN_HZ,
     };
@@ -97,14 +114,26 @@ const int32_t *sdr_config_step_options(size_t *count)
 void sdr_config_set_mode(uint8_t mode)
 {
     portENTER_CRITICAL(&s_lock);
-    s_cfg.mode = (mode == SDR_MODE_LSB) ? SDR_MODE_LSB : SDR_MODE_USB;
+    if (mode == SDR_MODE_LSB) {
+        s_cfg.mode = SDR_MODE_LSB;
+    } else if (mode == SDR_MODE_AM) {
+        s_cfg.mode = SDR_MODE_AM;
+    } else {
+        s_cfg.mode = SDR_MODE_USB;
+    }
     portEXIT_CRITICAL(&s_lock);
 }
 
 void sdr_config_toggle_mode(void)
 {
     portENTER_CRITICAL(&s_lock);
-    s_cfg.mode = (s_cfg.mode == SDR_MODE_USB) ? SDR_MODE_LSB : SDR_MODE_USB;
+    if (s_cfg.mode == SDR_MODE_USB) {
+        s_cfg.mode = SDR_MODE_LSB;
+    } else if (s_cfg.mode == SDR_MODE_LSB) {
+        s_cfg.mode = SDR_MODE_AM;
+    } else {
+        s_cfg.mode = SDR_MODE_USB;
+    }
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -138,9 +167,71 @@ void sdr_config_set_agc_target(uint8_t target)
     portEXIT_CRITICAL(&s_lock);
 }
 
+void sdr_config_set_agc_enabled(bool enabled)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.agc_enabled = enabled;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_manual_gain_db(int16_t db)
+{
+    if (db > SDR_MAX_GAIN_DB) {
+        db = SDR_MAX_GAIN_DB;
+    } else if (db < SDR_MIN_GAIN_DB) {
+        db = SDR_MIN_GAIN_DB;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.manual_gain_db = db;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_src(uint8_t src)
+{
+    if (src > SDR_SRC_I) {
+        src = SDR_SRC_IQ;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.src = src;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_audio_lpf_hz(uint16_t hz)
+{
+    if (hz < SDR_MIN_AUDIO_LPF_HZ) {
+        hz = SDR_MIN_AUDIO_LPF_HZ;
+    } else if (hz > SDR_MAX_AUDIO_LPF_HZ) {
+        hz = SDR_MAX_AUDIO_LPF_HZ;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.lpf_hz = hz;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_adc_atten_db(uint8_t atten_db)
+{
+    if (atten_db > SDR_MAX_ADC_ATTEN_DB) {
+        atten_db = SDR_MAX_ADC_ATTEN_DB;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.adc_atten_db = atten_db;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_test_tone_hz(uint16_t hz)
+{
+    /* 0 = off; >0 = sintesis sinus langsung ke SDM (bypass antrean DSP). */
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.test_tone_hz = hz;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+
 void sdr_config_set_fft_bins(uint16_t bins)
 {
-    if (bins != 1024 && bins != 2048) {
+    /* Mode keluaran spektrum: decimasi FFT-2048 (512/1024/2048 bin), tanpa
+     * re-init twiddle & tanpa memori tambahan (ARCHITECTURE.md §3 cat. mode). */
+    if (bins != 512 && bins != 1024 && bins != 2048) {
         return;
     }
     portENTER_CRITICAL(&s_lock);

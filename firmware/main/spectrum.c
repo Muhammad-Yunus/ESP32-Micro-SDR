@@ -165,18 +165,19 @@ bool spectrum_get_db_ex(float *out_db, int *out_nbins, bool ignore_lock)
      * Jumlah bin mengikuti mode runtime sdr_config.fft_bins:
      *   out_n = 2048 → stride 1 → bin FFT natural k (5,86 Hz/bin)
      *   out_n = 1024 → stride 2 → bin FFT natural 2m (11,72 Hz/bin)
-     * Karena DFT-1024 dari jendela yang sama == bin genap DFT-2048
-     * zero-pad (X_2048[2m] == X_1024[m], magnitudo identik), mode 1024
+     *   out_n = 512  → stride 4 → bin FFT natural 4m (23,44 Hz/bin)
+     * Karena DFT-512/1024 dari jendela yang sama == sub-set bin DFT-2048
+     * zero-pad (X_2048[j*stride] == X_j[m], magnitudo identik), mode 512
      * cukup decimasi keluaran — tabel esp-dsp & pool tetap sama.
      *
      * Skala dBFS tetap (SP_FS_REFS dari panjang jendela 1024; zero-pad
-     * tidak mengubah magnitudo DTFT tone penuh-skala → 0 dB). */
+     * tidak mengubah magnitudo DTFT tone penuh-skala → 0 dB).*/
     uint16_t bins = sdr_config_fft_bins_get();
-    if (bins != 1024 && bins != 2048) {
+    if (bins != 512 && bins != 1024 && bins != 2048) {
         bins = 2048;
     }
     const int out_n = (int)bins;
-    const int stride = SP_FFT_N / out_n;         /* 1 atau 2             */
+    const int stride = SP_FFT_N / out_n;         /* 1 / 2 / 4            */
     const int center = out_n / 2;
 
     for (int j = 0; j < out_n; j++) {

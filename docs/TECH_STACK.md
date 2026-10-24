@@ -160,6 +160,9 @@ CONFIG_SDR_WATERFALL_ROWS=60
 CONFIG_SDR_DEFAULT_VOLUME_PCT=0                # default mute, naik lewat Vol+/Vol−
 CONFIG_SDR_ADC_ATTEN_DB=11
 CONFIG_SDR_ADC_POOL_BYTES=8192
+CONFIG_SDR_DEFAULT_LO_HZ=7203000                 # label LO default (visual only)
+CONFIG_SDR_DEFAULT_MODE_AM=y                    # default mode demod (AM / USB / LSB)
+CONFIG_SDR_AUDIO_SCALE_DIV=4                    # bagi skala output SDM /4 (attenuasi speaker)
 CONFIG_SDR_AGC_TARGET=96                     # target AGC (0 = AGC off)
 CONFIG_SDR_AGC_ATTACK_MS=5.0
 CONFIG_SDR_AGC_RELEASE_MS=200.0

@@ -4,6 +4,7 @@ firmware/dependencies.lock
 
 ## Build artifacts
 firmware/build/
+firmware/*.log
 
 ## ESP-IDF generated config
 firmware/sdkconfig

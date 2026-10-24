@@ -42,12 +42,12 @@ config SDR_WATERFALL_ROWS
 
 config SDR_ADC_ATTEN_DB
     int "ADC attenuation (dB)"
+    range 0 11
     default 11
     help
-        ADC input attenuation, dipetakan ke enum `adc_atten_t`:
-        0 -> 0 dB, 3 -> 2.5 dB, 6 -> 6 dB, 11 -> ~12 dB (rentang penuh).
-        Nilai lain menggagalkan kompilasi (rx_adc.c). 11 dB cocok dengan
-        keluaran front-end <= +/-1 V di sekitar bias 1,65 V.
+        ADC input attenuation preset used by rx_adc.c. Allowed values are
+        0, 3, 6, or 11; 11/12 both map to the full-scale 12 dB attenuation.
+        The runtime Settings modal can choose among these four presets.
 
 config SDR_ADC_POOL_BYTES
     int "ADC DMA internal pool (bytes)"
@@ -72,10 +72,25 @@ config SDR_ADC_BLOCK_FRAMES
 
 config SDR_DEFAULT_LO_HZ
     int "Default LO label (Hz)"
-    default 7050000
+    default 7203000
     help
         Visual-only LO frequency label shown in the top bar (the real LO
         is driven by an external Si5351 controller).
+
+choice SDR_DEFAULT_MODE
+    bool "Default modulation mode"
+    default SDR_DEFAULT_MODE_AM
+
+    config SDR_DEFAULT_MODE_USB
+        bool "SSB USB"
+
+    config SDR_DEFAULT_MODE_LSB
+        bool "SSB LSB"
+
+    config SDR_DEFAULT_MODE_AM
+        bool "AM (envelope detection)"
+
+endchoice
 
 config SDR_LO_MAX_HZ
     int "Maximum LO label (Hz)"
@@ -116,6 +131,18 @@ config SDR_AUDIO_BLOCK_SAMPLES
     help
         Samples per queued audio block (~21.3 ms at 12 kHz), see
         docs/ARCHITECTURE.md section 4.
+
+config SDR_AUDIO_SCALE_DIV
+    int "Audio output scale divisor"
+    default 4
+    range 1 127
+    help
+        Final-output attenuation applied at the sigma-delta pulse-density
+        stage (audio_out.c), AFTER the int8 DSP/AGC/volume path. 1 = full
+        scale; 4 divides the speaker amplitude by 4 (i.e. -12 dB). Does not
+        touch the DSP int8 scale or the self-test AGC expectations. The FM8002A
+        class-D amplifier is very sensitive, so the default output is divided
+        by 4 to keep 5-10 % volume usable without clipping the speaker.
 
 config SDR_SDM_GPIO
     int "Sigma-delta output GPIO"
@@ -201,6 +228,40 @@ config SDR_AGC_GAIN_MAX
         noise floor, menaikkan membuat AGC bisa mengatur sinyal lebih
         lemah (risiko noise ikut dikuatkan).
 
+config SDR_AGC_ENABLED
+    bool "Default AGC enabled"
+    default n
+    help
+        When enabled, automatic gain control is active by default. The user
+        can disable it from the Settings modal and use the manual gain slider
+        instead.
+
+config SDR_DEFAULT_GAIN_DB
+    int "Default manual gain (dB)"
+    range -24 54
+    default 20
+    help
+        Initial manual gain used when AGC is disabled. The Settings modal
+        exposes a gain slider from -24 dB to +54 dB (max matches the AGC
+        gain ceiling, DSP_AGC_GAIN_MAX = 512 = +54 dB) so the tone can be
+        brought up without clipping when AGC is off.
+
+config SDR_DEFAULT_AUDIO_LPF_HZ
+    int "Default audio LPF cutoff (Hz)"
+    range 100 6000
+    default 2000
+    help
+        Initial audio low-pass cutoff shown in the Settings modal. The value
+        is clamped to 100..6000 Hz at runtime.
+
+config SDR_DEFAULT_ADC_ATTEN_DB
+    int "Default ADC attenuation (dB)"
+    range 0 11
+    default 11
+    help
+        Initial ADC attenuation option. The Settings modal exposes the same
+        four ADC attenuation presets used by rx_adc.c.
+
 config SDR_SELFTEST
     bool "Self-test DSP (I/Q sintetis, tanpa ADC)"
     default n
@@ -210,5 +271,13 @@ config SDR_SELFTEST
         GPIO35/GPIO36 are never initialised. Results are printed to the
         serial log (tag "selftest"). Keep DISABLED for production
         firmware: the module adds ~29 KB of static buffers.
+
+config SDR_DEBUG_BYPASS_DSP
+    bool "DEBUG: bypass DSP, kirim I mentah ke audio_out (isolasi)"
+    default n
+    help
+        Hanya untuk debugging jalur ADC->SDM. Ambil sampel I (GPIO36) mentah,
+        lewati DC/NCO/BFO/LPF/AGC, kirim langsung ke audio_out. Jangan aktifkan
+        untuk penggunaan normal.
 
 endmenu

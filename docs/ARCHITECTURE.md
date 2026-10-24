@@ -19,7 +19,7 @@ jangan memindahkan tanggung jawab antar file tanpa revisi dokumen ini.
 │  sdr_rx_task (prio 12)                                                       │
 │    rx_adc: read DMA → deinterleave I/Q → float                               │
 │    dsp_chain: DC block → NCO offset → LPF + decim 48→24→12k                  │
-│               → BFO (USB/LSB) → audio LPF → AGC → volume → int16             │
+│               → BFO (USB/LSB) / envelope (AM) → audio LPF → AGC → volume │
 │         │                         │                                          │
 │         │ audio_q (ptr blok,      │ fft_snap_q (ptr snapshot, len 3,         │
 │         │ len 8, drop-BARU)       │ drop-LAMA, kirim timeout 0)              │
@@ -161,10 +161,10 @@ bool      selftest_start(void);                        // buat task selftest (Co
 
 /* sdr_config.h (lintas core) */
 typedef struct {
-    int32_t lo_label_hz;        // label visual, default 20000000 (bukan LO riil!)
+    int32_t lo_label_hz;        // label visual, default 7203000 (bukan LO riil!)
     int32_t nco_offset_hz;      // −CONFIG_SDR_NCO_LIMIT_HZ..+limit (default 2 MHz)
     int32_t nco_step_hz;        // 10/50/100/500/1k/10k/100k/1M
-    uint8_t mode;               // SDR_MODE_USB / SDR_MODE_LSB
+    uint8_t mode;               // SDR_MODE_USB / SDR_MODE_LSB / SDR_MODE_AM (default AM)
     uint8_t volume_pct;         // 0..100 (default 0 = mute, naik lewat Vol+/Vol−)
     uint8_t agc_target;         // level target AGC
     int16_t lo_i, lo_q;         // (placeholder kalibrasi I/Q — future)
@@ -232,6 +232,9 @@ Ukuran RAM terverifikasi di board (ESP32 klasik, tanpa PSRAM):
 5. `audio_feed_task` memutar blok ke kanal SDM dengan interpolasi linear ×4
    (update density 48 kHz — citra ZOH di luar band audio): satu
    `sdm_channel_set_pulse_density()` per update, dipacing deadline absolut.
+   Sebelum ditulis, density dibagi `CONFIG_SDR_AUDIO_SCALE_DIV` (default 4 =
+   −12 dB) — attenuasi output speaker; tidak menyentuh skala int8 jalur DSP
+   maupun ekspektasi self-test AGC.
 6. Terpisah: setiap 1024 frame **pasca-NCO** (decimasi 12 kHz), snapshot
    disalin ke slot pool dan pointer dikirim ke `fft_snap_q`.
 7. Timer UI 30 ms di Core 0: ambil snapshot terbaru → window → FFT → dB →
@@ -244,18 +247,25 @@ Ukuran RAM terverifikasi di board (ESP32 klasik, tanpa PSRAM):
 | # | Tahap | Rumus / detail | Output rate |
 | :--- | :--- | :--- | :--- |
 | 1 | Normalisasi | `x = (raw12 − 2048) / 2048` (di `rx_adc`) | 48 kHz |
-| 2 | DC removal | `y[n] = x[n] − x[n−1] + R·y[n−1]`, `R = 0.996` (~30 Hz), per kanal, **sebelum** NCO | 48 kHz |
+| 2 | DC removal | `y[n] = x[n] − x[n−1] + R·y[n−1]`, `R = 0.996` (~30 Hz), per kanal, **sebelum** NCO. **Dilewati pada mode AM** (carrier AM = komponen DC kanal I; carrier dibuang oleh DC-blocker khusus envelope di tahap 5) | 48 kHz |
 | 3 | NCO offset | `I' = I·c + Q·s`, `Q' = Q·c − I·s`, `φ += 2π·f_offset/fs`; sin/cos dari LUT 1024 + interp linear; step per-blok (fase kontinu) | 48 kHz |
 | 4 | LPF kanal + decimasi | Halfband/double-halfband 2,7 kHz, 48→24→12 kHz (`dsps_fir_dec2_f32` / `dsps_fir_f32`), state tersimpan antar blok | 12 kHz |
-| 5 | BFO ke-2 (pemilih sideband) | `I' = I·c + Q·s`, `Q' = Q·c − I·s` dengan `φ_B += 2π·f_BFO/fs`; **USB: `f_BFO = +1500`** (frekuensi turun → sideband atas lolos), **LSB: `f_BFO = −1500`** (frekuensi naik → sideband bawah lolos) | 12 kHz |
+| 5 | BFO ke-2 (pemilih sideband) / envelope (AM) | SSB: `I' = I·c + Q·s`, `Q' = Q·c − I·s` dengan `φ_B += 2π·f_BFO/fs`; **USB: `f_BFO = +1500`** (frekuensi turun → sideband atas lolos), **LSB: `f_BFO = −1500`** (frekuensi naik → sideband bawah lolos). AM: `env = sqrt(I² + Q²)` (envelope detection) + DC-blocker envelope buang carrier | 12 kHz |
 | 6 | Audio LPF | FIR ~2,0 kHz pada komponen I hasil mix (band audio 300–2700 terjemah ke ±1200 Hz) | 12 kHz |
-| 7 | AGC + volume | env attack 5 ms / release 200 ms; `gain = clamp(target/env, 1/64, SDR_AGC_GAIN_MAX)`; smooth; kelipat ×volume; clip ke `int8` (pulse density SDM) | 12 kHz |
+| 7 | AGC + volume + squelch | env attack 5 ms / release 200 ms; `gain = clamp(target/env, 1/64, SDR_AGC_GAIN_MAX)`; smooth; kelipat ×volume; clip ke `int8` (pulse density SDM). **Squelch otomatis** (hanya saat AGC aktif): envelope pra-gain < `target/gain_max` (= lantai AGC, §FR-5) → gerbang output difade ke 0 dalam ~330 ms; sinyal → buka ~3 ms. Mode gain manual tidak digate | 12 kHz |
 
 Catatan desain:
 - Struktur dua-mixer (Weaver) dipilih; Hilbert FIR adalah varian setara — jika
   suatu saat dipakai, tempatkan di tahap 5 tanpa mengubah modul lain.
 - Urutan penting: DC block **sebelum** NCO; LPF kanal **antara** NCO utama dan
   BFO; jika digabung jadi satu NCO saja, LPF kanal harus ikut digeser — jangan.
+- **Mode AM (envelope detection)**: pada IQ @12 kHz tahap 5 menghitung
+  `env = sqrt(I²+Q²)`. Carrier AM (siaran) berupa komponen DC di kanal I,
+  sehingga DC-blocker tahap 2 **dilewati** (agar carrier tetap tersedia);
+  carrier kemudian dibuang oleh DC-blocker khusus envelope
+  (`env − x[n−1] + R·y[n−1]`, tahap 5) sebelum audio LPF. Pengujian self-test
+  T06a memakai AGC aktif karena amplitudo envelope AM kecil terkuantisasi
+  ke 0 pada int8 tanpa penguatan (lihat PRD §6.1 T-AM).
 - Semua operasi per-blok (vector), bukan per-sampel panggilan library — untuk
   cache & pipeline.
 - Implementasi (F5, `dsp_chain.c`): LUT sin 1024 + interpolasi linear (cos =
@@ -323,14 +333,14 @@ DILARANG:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ 20.000.000  [+1.200]  USB   S7   vol ▮▮▮▯▯              ⚙  │  52 px (top bar)
+│ 7.203.000  [+1.200]  AM  vol ▮▮▮▯▯                    ⚙  │  52 px (top bar)
 ├────────────────────────────────────────────────────────────┤
 │ dBFS  |||  ||||| |||  |  ||||| ||  |||  ||||| |||||  |||||  │  56..184 (plot 442×128)
 │  -20  ─────────────────────────────────────────────────    │  + strip label X 18 px
 ├────────────────────────────────────────────────────────────┤
 │              WATERFALL (canvas 480 × 60, RGB565)           │  204..264
 ├────────────────────────────────────────────────────────────┤
-│ [USB/LSB]  [−] [+]  step 100  [Keypad]  [Vol−] [Vol+]     │  56 px (bottom bar)
+│ [USB/LSB/AM]  [−] [+]  step 100  [Keypad]  [Vol−] [Vol+]  │  56 px (bottom bar)
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -375,9 +385,14 @@ sedangkan area plot chart 442 px (x30..471) + padding kanan 8 px.
 
 | Baris | Kontrol | Nilai | Efek |
 | :--- | :--- | :--- | :--- |
-| 1 | `FFT bin` | 1024 / 2048 (checkable) | `sdr_config_set_fft_bins()` → lebar bin 11,72 / 5,86 Hz/bin; readout Hz/bin di bawah tombol |
-| 2 | `LO span` | label + readout nilai efektif | `start-stop: +/-500 Hz`, atau `+/-6K Hz (max)` bila preset di-clamp FS/2 |
-| 3 | preset span | 250 / 500 / 1K / 2K / 5K / 10K (checkable) | `sdr_config_set_span_half()` → zoom tampilan |
+| 1 | `AGC` | switch on/off | `sdr_config_set_agc_enabled()`; off = gain manual |
+| 2 | `Gain` | slider −24…+54 dB | gain manual (aktif saat AGC off) |
+| 3 | `Audio LPF` | slider 100…6000 Hz | desain ulang FIR audio LPF runtime |
+| 4 | `ADC atten` | preset 0 / 2.5 / 6 / 12 dB | attenuation ADC I/Q |
+| 5 | `Source` | preset IQ / Q / I | pilih kanal I/Q yang didemod |
+| 6 | `Test` | switch + preset 250 / 1k / 2k / 4k | tone sintesis DDS langsung ke SDM (bypass antrean DSP), amplitudo × volume; OFF = demod normal |
+| 7 | `FFT bin` | 1024 / 2048 (checkable) | `sdr_config_set_fft_bins()` → lebar bin 11,72 / 5,86 Hz/bin; readout Hz/bin di bawah tombol |
+| 8 | `LO span` | label + preset 250 / 500 / 1K / 2K / 5K / 10K | `sdr_config_set_span_half()` → zoom tampilan |
 
 Setiap perubahan skala memanggil `ui_scope_refresh()`: sinkron span efektif,
 `memset` buffer waterfall (baris lama memakai skala sebelumnya), invalidate

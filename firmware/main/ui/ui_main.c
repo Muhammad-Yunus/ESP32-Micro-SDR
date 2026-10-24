@@ -72,12 +72,32 @@ static entry_target_t s_entry = ENTRY_OFFSET;
 static lv_obj_t *s_modal_settings;
 static lv_obj_t *s_lbl_fft_bin_hz;
 static lv_obj_t *s_lbl_span_val;
+static lv_obj_t *s_lbl_gain;
+static lv_obj_t *s_lbl_lpf;
+static lv_obj_t *s_btn_fft_512;
 static lv_obj_t *s_btn_fft_1024;
 static lv_obj_t *s_btn_fft_2048;
 #define UI_SPAN_BTN_MAX 8
 static lv_obj_t *s_btn_span[UI_SPAN_BTN_MAX];
 static int32_t s_btn_span_val[UI_SPAN_BTN_MAX];
 static int s_btn_span_n;
+
+/* Toggle-button groups in the settings modal (index <-> value mapping fixed
+ * at creation; used to reflect the checked state when reopening). */
+#define UI_ATTN_BTN_MAX 4
+static lv_obj_t *s_btn_atten[UI_ATTN_BTN_MAX];
+static uint8_t s_btn_atten_val[UI_ATTN_BTN_MAX];
+#define UI_SRC_BTN_MAX 3
+static lv_obj_t *s_btn_src[UI_SRC_BTN_MAX];
+static uint8_t s_btn_src_val[UI_SRC_BTN_MAX];
+
+/* Sliders (AGC-off gain only matters; dimmed when AGC is on). */
+static lv_obj_t *s_sl_gain;
+
+/* Preset frekuensi tone uji (250/1k/2k/4k) — isolasi harmonik SDM/amp. */
+#define UI_TTONE_BTN_MAX 4
+static lv_obj_t *s_btn_ttone[UI_TTONE_BTN_MAX];
+static uint16_t s_btn_ttone_val[UI_TTONE_BTN_MAX];
 
 /* ------------------------------------------------------------------ */
 /* Formatting helpers                                                  */
@@ -156,7 +176,12 @@ static void update_freq_bar(void)
 
     char lo[16];
     char off[24];
-    const char *mode = (cfg.mode == SDR_MODE_LSB) ? "LSB" : "USB";
+    const char *mode = "USB";
+    if (cfg.mode == SDR_MODE_LSB) {
+        mode = "LSB";
+    } else if (cfg.mode == SDR_MODE_AM) {
+        mode = "AM";
+    }
     fmt_hz_dot(lo, sizeof(lo), (uint32_t)cfg.lo_label_hz);
     fmt_offset_bracket(off, sizeof(off), cfg.nco_offset_hz);
     lv_label_set_text(s_label_freq, lo);
@@ -230,12 +255,21 @@ static void settings_modal_close(void)
         s_modal_settings = NULL;
         s_lbl_fft_bin_hz = NULL;
         s_lbl_span_val = NULL;
+        s_lbl_gain = NULL;
+        s_lbl_lpf = NULL;
+        s_btn_fft_512 = NULL;
         s_btn_fft_1024 = NULL;
         s_btn_fft_2048 = NULL;
         for (int i = 0; i < s_btn_span_n; i++) {
             s_btn_span[i] = NULL;
         }
         s_btn_span_n = 0;
+        for (int i = 0; i < UI_ATTN_BTN_MAX; i++) {
+            s_btn_atten[i] = NULL;
+        }
+        for (int i = 0; i < UI_SRC_BTN_MAX; i++) {
+            s_btn_src[i] = NULL;
+        }
         lv_obj_delete_async(m);
     }
 }
@@ -625,11 +659,15 @@ static void fft_bin_cb(lv_event_t *e)
 {
     const uint16_t bins = (uint16_t)(uintptr_t)lv_event_get_user_data(e);
     sdr_config_set_fft_bins(bins);
-    if (s_btn_fft_1024 != NULL && s_btn_fft_2048 != NULL) {
+    if (s_btn_fft_512 != NULL && s_btn_fft_1024 != NULL &&
+        s_btn_fft_2048 != NULL) {
+        lv_obj_clear_state(s_btn_fft_512, LV_STATE_CHECKED);
         lv_obj_clear_state(s_btn_fft_1024, LV_STATE_CHECKED);
         lv_obj_clear_state(s_btn_fft_2048, LV_STATE_CHECKED);
-        lv_obj_add_state((bins == 1024) ? s_btn_fft_1024 : s_btn_fft_2048,
-                         LV_STATE_CHECKED);
+        lv_obj_add_state(
+            (bins == 512) ? s_btn_fft_512 :
+            (bins == 1024) ? s_btn_fft_1024 : s_btn_fft_2048,
+            LV_STATE_CHECKED);
     }
     if (s_lbl_fft_bin_hz != NULL) {
         char buf[32];
@@ -668,6 +706,146 @@ static void settings_close_cb(lv_event_t *e)
     settings_modal_close();
 }
 
+static void ui_sync_group(lv_obj_t *btns[], int n, uint8_t vals[], uint8_t cur);
+
+static void agc_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    sdr_config_set_agc_enabled(lv_obj_has_state(sw, LV_STATE_CHECKED));
+}
+
+static void gain_cb(lv_event_t *e)
+{
+    lv_obj_t *sl = lv_event_get_target(e);
+    const int32_t v = lv_slider_get_value(sl); /* SDR_MIN..SDR_MAX_GAIN_DB */
+    sdr_config_set_manual_gain_db((int16_t)v);
+    if (s_lbl_gain != NULL) {
+        char buf[12];
+        snprintf(buf, sizeof(buf), "%d dB", (int)v);
+        lv_label_set_text(s_lbl_gain, buf);
+    }
+}
+
+static void lpf_cb(lv_event_t *e)
+{
+    lv_obj_t *sl = lv_event_get_target(e);
+    const int32_t v = lv_slider_get_value(sl); /* SDR_MIN..SDR_MAX_AUDIO_LPF_HZ */
+    sdr_config_set_audio_lpf_hz((uint16_t)v);
+    if (s_lbl_lpf != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d Hz", (int)v);
+        lv_label_set_text(s_lbl_lpf, buf);
+    }
+}
+
+static void testtone_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    const bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    sdr_config_set_test_tone_hz(on ? 1000 : 0);
+    ESP_LOGI("ui", "test tone %d Hz %s (bypass antrean DSP)", on ? 1000 : 0,
+             on ? "ON" : "OFF");
+}
+
+/* Preset frekuensi tone (250/1k/2k/4k) — pantau apakah harmonik kuat
+ * mengikut 2x-f (nonlinier analog) atau tetap di satu posisi (osilasi amp). */
+static void testtone_freq_cb(lv_event_t *e)
+{
+    const uint16_t hz = (uint16_t)(uintptr_t)lv_event_get_user_data(e);
+    sdr_config_set_test_tone_hz(hz);
+    for (int i = 0; i < UI_TTONE_BTN_MAX; i++) {
+        if (s_btn_ttone[i] == NULL) {
+            continue;
+        }
+        if (s_btn_ttone_val[i] == hz) {
+            lv_obj_add_state(s_btn_ttone[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(s_btn_ttone[i], LV_STATE_CHECKED);
+        }
+    }
+    ESP_LOGI("ui", "test tone freq -> %u Hz", (unsigned)hz);
+}
+
+static void atten_cb(lv_event_t *e)
+{
+    const uint8_t db = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    sdr_config_set_adc_atten_db(db);
+    ui_sync_group(s_btn_atten, UI_ATTN_BTN_MAX, s_btn_atten_val, db);
+}
+
+static void src_cb(lv_event_t *e)
+{
+    const uint8_t src = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    sdr_config_set_src(src);
+    ui_sync_group(s_btn_src, UI_SRC_BTN_MAX, s_btn_src_val, src);
+}
+
+/* Mirror sdr_config onto a group of checkable buttons (re-sync on reopen). */
+static void ui_sync_group(lv_obj_t *btns[], int n, uint8_t vals[], uint8_t cur)
+{
+    for (int i = 0; i < n; i++) {
+        if (btns[i] == NULL) {
+            continue;
+        }
+        if (vals[i] == cur) {
+            lv_obj_add_state(btns[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(btns[i], LV_STATE_CHECKED);
+        }
+    }
+}
+
+/* Satu baris config: label tetap + konten row. Dipakai di body settings. */
+static lv_obj_t *ui_cfg_row(lv_obj_t *parent, const char *label_text,
+                            uint32_t label_w)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_PCT(100), 34);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 8, 0);
+
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_label_set_text(lbl, label_text);
+    lv_obj_set_style_text_color(lbl, ui_col_fg(), 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(lbl, label_w);
+    return row;
+}
+
+/* Tombol checkable kecil bergaya modal (untuk group opsi: atten/src/fft). */
+static lv_obj_t *ui_cfg_button(lv_obj_t *row, const char *text, uint32_t w)
+{
+    lv_obj_t *b = lv_button_create(row);
+    lv_obj_set_size(b, w, 28);
+    lv_obj_set_style_bg_color(b, ui_col_btn(), 0);
+    lv_obj_set_style_bg_color(b, ui_col_btn_press(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, ui_col_btn_checked(), LV_STATE_CHECKED);
+    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_border_width(b, 0, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_checkable(b, true);
+    lv_obj_t *lb = lv_label_create(b);
+    lv_label_set_text(lb, text);
+    lv_obj_set_style_text_color(lb, ui_col_fg(), 0);
+    lv_obj_center(lb);
+    return b;
+}
+
+/* Slider draggable + label nilai di-kanan (gain/LPF). */
+static lv_obj_t *ui_cfg_slider(lv_obj_t *row, int32_t min_v, int32_t max_v,
+                               int32_t cur, lv_event_cb_t cb, uint32_t w)
+{
+    lv_obj_t *sl = lv_slider_create(row);
+    lv_obj_set_size(sl, w, 24);
+    lv_slider_set_range(sl, min_v, max_v);
+    lv_slider_set_value(sl, cur, LV_ANIM_OFF);
+    lv_obj_add_event_cb(sl, cb, LV_EVENT_VALUE_CHANGED, NULL);
+    return sl;
+}
+
 static void settings_open_cb(lv_event_t *e)
 {
     (void)e;
@@ -678,7 +856,7 @@ static void settings_open_cb(lv_event_t *e)
     lv_obj_t *scr = lv_screen_active();
 
     s_modal_settings = lv_obj_create(scr);
-    lv_obj_set_size(s_modal_settings, 430, 232);
+    lv_obj_set_size(s_modal_settings, 440, 300);
     lv_obj_center(s_modal_settings);
     lv_obj_set_style_bg_color(s_modal_settings, ui_col_modal(), 0);
     lv_obj_set_style_bg_opa(s_modal_settings, LV_OPA_COVER, 0);
@@ -714,136 +892,191 @@ static void settings_open_cb(lv_event_t *e)
     lv_obj_set_style_text_color(xlbl, ui_col_fg(), 0);
     lv_obj_center(xlbl);
 
-    /* Row 1: FFT bin selector (1024 / 2048) + Hz/bin readout. */
-    lv_obj_t *row_fft = lv_obj_create(s_modal_settings);
-    lv_obj_remove_style_all(row_fft);
-    lv_obj_set_size(row_fft, LV_PCT(100), 32);
-    lv_obj_set_flex_flow(row_fft, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row_fft, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row_fft, 8, 0);
+    /* Body: satu baris per config; grow mengisi sisa tinggi modal, lalu
+     * scrollable (FLAG_SCROLLABLE) bila isi melebihi tinggi → scrollbar AUTO. */
+    lv_obj_t *body = lv_obj_create(s_modal_settings);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_size(body, LV_PCT(100), 0);
+    lv_obj_set_flex_grow(body, 1);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(body, 6, 0);
+    lv_obj_add_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scroll_dir(body, LV_DIR_VER);
 
-    lv_obj_t *lfft = lv_label_create(row_fft);
-    lv_label_set_text(lfft, "FFT bin");
-    lv_obj_set_style_text_color(lfft, ui_col_fg(), 0);
-    lv_obj_set_style_text_font(lfft, &lv_font_montserrat_14, 0);
-    lv_obj_set_width(lfft, 76);
+    sdr_config_t s_cfg;
+    sdr_config_get(&s_cfg);
 
-    lv_obj_t *b1024 = lv_button_create(row_fft);
-    lv_obj_set_size(b1024, 64, 30);
-    lv_obj_set_style_bg_color(b1024, ui_col_btn(), 0);
-    lv_obj_set_style_bg_color(b1024, ui_col_btn_press(), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(b1024, ui_col_btn_checked(), LV_STATE_CHECKED);
-    lv_obj_set_style_radius(b1024, 4, 0);
-    lv_obj_set_style_border_width(b1024, 0, 0);
-    lv_obj_set_style_shadow_width(b1024, 0, 0);
-    lv_obj_set_checkable(b1024, true);
-    lv_obj_add_event_cb(b1024, fft_bin_cb, LV_EVENT_CLICKED,
-                        (void *)(uintptr_t)1024);
-    lv_obj_t *lb1024 = lv_label_create(b1024);
-    lv_label_set_text(lb1024, "1024");
-    lv_obj_set_style_text_color(lb1024, ui_col_fg(), 0);
-    lv_obj_center(lb1024);
-
-    lv_obj_t *b2048 = lv_button_create(row_fft);
-    lv_obj_set_size(b2048, 64, 30);
-    lv_obj_set_style_bg_color(b2048, ui_col_btn(), 0);
-    lv_obj_set_style_bg_color(b2048, ui_col_btn_press(), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(b2048, ui_col_btn_checked(), LV_STATE_CHECKED);
-    lv_obj_set_style_radius(b2048, 4, 0);
-    lv_obj_set_style_border_width(b2048, 0, 0);
-    lv_obj_set_style_shadow_width(b2048, 0, 0);
-    lv_obj_set_checkable(b2048, true);
-    lv_obj_add_event_cb(b2048, fft_bin_cb, LV_EVENT_CLICKED,
-                        (void *)(uintptr_t)2048);
-    lv_obj_t *lb2048 = lv_label_create(b2048);
-    lv_label_set_text(lb2048, "2048");
-    lv_obj_set_style_text_color(lb2048, ui_col_fg(), 0);
-    lv_obj_center(lb2048);
-
-    s_lbl_fft_bin_hz = lv_label_create(row_fft);
-    lv_obj_set_style_text_color(s_lbl_fft_bin_hz, ui_col_dim(), 0);
-    lv_obj_set_style_text_font(s_lbl_fft_bin_hz, &lv_font_montserrat_14, 0);
-
-    const uint16_t bins = sdr_config_fft_bins_get();
-    s_btn_fft_1024 = b1024;
-    s_btn_fft_2048 = b2048;
-    if (bins == 1024) {
-        lv_obj_add_state(b1024, LV_STATE_CHECKED);
-    } else {
-        lv_obj_add_state(b2048, LV_STATE_CHECKED);
+    /* Baris AGC (switch on/off). */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "AGC", 96);
+        lv_obj_t *agc_sw = lv_switch_create(row);
+        lv_obj_set_size(agc_sw, 44, 28);
+        lv_obj_add_event_cb(agc_sw, agc_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        if (s_cfg.agc_enabled) {
+            lv_obj_add_state(agc_sw, LV_STATE_CHECKED);
+        }
     }
-    char fbh[32];
-    fmt_hz_per_bin(fbh, sizeof(fbh), bins);
-    lv_label_set_text(s_lbl_fft_bin_hz, fbh);
 
-    /* Row 2: label + LO start/stop span value. */
-    lv_obj_t *row_span_lbl = lv_obj_create(s_modal_settings);
-    lv_obj_remove_style_all(row_span_lbl);
-    lv_obj_set_size(row_span_lbl, LV_PCT(100), 22);
-    lv_obj_set_flex_flow(row_span_lbl, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row_span_lbl, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row_span_lbl, 8, 0);
+    /* Baris gain manual (slider -24..+54 dB, aktif saat AGC off). */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "Gain", 96);
+        s_sl_gain = ui_cfg_slider(row, SDR_MIN_GAIN_DB, SDR_MAX_GAIN_DB,
+                                  (int32_t)s_cfg.manual_gain_db, gain_cb, 180);
+        s_lbl_gain = lv_label_create(row);
+        char gb[12];
+        snprintf(gb, sizeof(gb), "%d dB", (int)s_cfg.manual_gain_db);
+        lv_label_set_text(s_lbl_gain, gb);
+        lv_obj_set_style_text_color(s_lbl_gain, ui_col_dim(), 0);
+        lv_obj_set_style_text_font(s_lbl_gain, &lv_font_montserrat_14, 0);
+        lv_obj_set_width(s_lbl_gain, 52);
+        lv_obj_add_flag(s_lbl_gain, LV_OBJ_FLAG_CLICKABLE);
+    }
 
-    lv_obj_t *lspan = lv_label_create(row_span_lbl);
-    lv_label_set_text(lspan, "LO span");
-    lv_obj_set_style_text_color(lspan, ui_col_fg(), 0);
-    lv_obj_set_style_text_font(lspan, &lv_font_montserrat_14, 0);
-    lv_obj_set_width(lspan, 76);
+    /* Baris LPF audio (slider 100..6000 Hz). */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "Audio LPF", 96);
+        ui_cfg_slider(row, SDR_MIN_AUDIO_LPF_HZ, SDR_MAX_AUDIO_LPF_HZ,
+                      (int32_t)s_cfg.lpf_hz, lpf_cb, 180);
+        s_lbl_lpf = lv_label_create(row);
+        char lb[16];
+        snprintf(lb, sizeof(lb), "%d Hz", (int)s_cfg.lpf_hz);
+        lv_label_set_text(s_lbl_lpf, lb);
+        lv_obj_set_style_text_color(s_lbl_lpf, ui_col_dim(), 0);
+        lv_obj_set_style_text_font(s_lbl_lpf, &lv_font_montserrat_14, 0);
+        lv_obj_set_width(s_lbl_lpf, 52);
+        lv_obj_add_flag(s_lbl_lpf, LV_OBJ_FLAG_CLICKABLE);
+    }
 
-    s_lbl_span_val = lv_label_create(row_span_lbl);
-    lv_obj_set_style_text_color(s_lbl_span_val, ui_col_dim(), 0);
-    lv_obj_set_style_text_font(s_lbl_span_val, &lv_font_montserrat_14, 0);
-
-    const int32_t sh = sdr_config_span_half_get();
-    const int32_t sh_eff = sdr_config_span_half_effective();
-    char sv[40];
-    fmt_span_hz(sv, sizeof(sv), sh_eff, sh_eff != sh);
-    lv_label_set_text(s_lbl_span_val, sv);
-
-    /* Row 3: span options (250 Hz .. 10 kHz). */
-    lv_obj_t *row_span = lv_obj_create(s_modal_settings);
-    lv_obj_remove_style_all(row_span);
-    lv_obj_set_size(row_span, LV_PCT(100), 32);
-    lv_obj_set_flex_flow(row_span, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row_span, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row_span, 6, 0);
-
-    size_t sc = 0;
-    const int32_t *sopts = sdr_config_span_options(&sc);
-    s_btn_span_n = 0;
-    for (size_t i = 0; i < sc; i++) {
-        lv_obj_t *b = lv_button_create(row_span);
-        lv_obj_set_size(b, 58, 30);
-        lv_obj_set_style_bg_color(b, ui_col_btn(), 0);
-        lv_obj_set_style_bg_color(b, ui_col_btn_press(), LV_STATE_PRESSED);
-        lv_obj_set_style_bg_color(b, ui_col_btn_checked(), LV_STATE_CHECKED);
-        lv_obj_set_style_radius(b, 4, 0);
-        lv_obj_set_style_border_width(b, 0, 0);
-        lv_obj_set_style_shadow_width(b, 0, 0);
-        lv_obj_set_checkable(b, true);
-        lv_obj_add_event_cb(b, span_cb, LV_EVENT_CLICKED,
-                            (void *)(uintptr_t)sopts[i]);
-        if (sopts[i] == sh) {
-            lv_obj_add_state(b, LV_STATE_CHECKED);
+    /* Baris attenuasi ADC (0 / 2.5 / 6 / 12 dB). */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "ADC atten", 96);
+        const uint8_t atten_vals[] = {0, 3, 6, 11};
+        const char *atten_txt[] = {"0", "2.5", "6", "12"};
+        for (int a = 0; a < UI_ATTN_BTN_MAX; a++) {
+            lv_obj_t *b = ui_cfg_button(row, atten_txt[a], 30);
+            lv_obj_add_event_cb(b, atten_cb, LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)atten_vals[a]);
+            s_btn_atten[a] = b;
+            s_btn_atten_val[a] = atten_vals[a];
+            if (s_cfg.adc_atten_db == atten_vals[a]) {
+                lv_obj_add_state(b, LV_STATE_CHECKED);
+            }
         }
-        if (s_btn_span_n < UI_SPAN_BTN_MAX) {
-            s_btn_span[s_btn_span_n] = b;
-            s_btn_span_val[s_btn_span_n] = sopts[i];
-            s_btn_span_n++;
+    }
+
+    /* Baris sumber I/Q (IQ / Q / I). */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "Source", 96);
+        const uint8_t src_vals[] = {SDR_SRC_IQ, SDR_SRC_Q, SDR_SRC_I};
+        const char *src_txt[] = {"IQ", "Q", "I"};
+        for (int s = 0; s < UI_SRC_BTN_MAX; s++) {
+            lv_obj_t *b = ui_cfg_button(row, src_txt[s], 40);
+            lv_obj_add_event_cb(b, src_cb, LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)src_vals[s]);
+            s_btn_src[s] = b;
+            s_btn_src_val[s] = src_vals[s];
+            if (s_cfg.src == src_vals[s]) {
+                lv_obj_add_state(b, LV_STATE_CHECKED);
+            }
         }
-        lv_obj_t *lb = lv_label_create(b);
-        char stxt[12];
-        if (sopts[i] >= 1000) {
-            snprintf(stxt, sizeof(stxt), "%ldK", (long)(sopts[i] / 1000));
+    }
+
+    /* Baris tone uji: "Test" ON + preset frekuensi (250/1k/2k/4k) = sine
+     * murni -> SDM (bypass antrean DSP), amplitudo ikut volume.
+     * OFF = kembali ke blok demod normal. */
+    {
+        const uint16_t tt_vals[] = {250, 1000, 2000, 4000};
+        const char *tt_txt[] = {"250", "1k", "2k", "4k"};
+
+        lv_obj_t *row = ui_cfg_row(body, "Test", 96);
+        lv_obj_t *tt_sw = lv_switch_create(row);
+        lv_obj_set_size(tt_sw, 44, 28);
+        lv_obj_add_event_cb(tt_sw, testtone_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        if (s_cfg.test_tone_hz > 0) {
+            lv_obj_add_state(tt_sw, LV_STATE_CHECKED);
+        }
+
+        for (int f = 0; f < UI_TTONE_BTN_MAX; f++) {
+            lv_obj_t *b = ui_cfg_button(row, tt_txt[f], 30);
+            lv_obj_add_event_cb(b, testtone_freq_cb, LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)tt_vals[f]);
+            s_btn_ttone[f] = b;
+            s_btn_ttone_val[f] = tt_vals[f];
+            if (s_cfg.test_tone_hz == tt_vals[f]) {
+                lv_obj_add_state(b, LV_STATE_CHECKED);
+            }
+        }
+    }
+
+    /* Baris FFT bin (512 / 1024 / 2048) + readout Hz/bin. */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "FFT bin", 96);
+        const uint16_t bins = sdr_config_fft_bins_get();
+        s_btn_fft_512 = ui_cfg_button(row, "512", 44);
+        s_btn_fft_1024 = ui_cfg_button(row, "1024", 44);
+        s_btn_fft_2048 = ui_cfg_button(row, "2048", 44);
+        lv_obj_add_event_cb(s_btn_fft_512, fft_bin_cb, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)512);
+        lv_obj_add_event_cb(s_btn_fft_1024, fft_bin_cb, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)1024);
+        lv_obj_add_event_cb(s_btn_fft_2048, fft_bin_cb, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)2048);
+        if (bins == 512) {
+            lv_obj_add_state(s_btn_fft_512, LV_STATE_CHECKED);
+        } else if (bins == 1024) {
+            lv_obj_add_state(s_btn_fft_1024, LV_STATE_CHECKED);
         } else {
-            snprintf(stxt, sizeof(stxt), "%ld", (long)sopts[i]);
+            lv_obj_add_state(s_btn_fft_2048, LV_STATE_CHECKED);
         }
-        lv_label_set_text(lb, stxt);
-        lv_obj_set_style_text_color(lb, ui_col_fg(), 0);
-        lv_obj_center(lb);
+        s_lbl_fft_bin_hz = lv_label_create(row);
+        char fbh[32];
+        fmt_hz_per_bin(fbh, sizeof(fbh), bins);
+        lv_label_set_text(s_lbl_fft_bin_hz, fbh);
+        lv_obj_set_style_text_color(s_lbl_fft_bin_hz, ui_col_dim(), 0);
+        lv_obj_set_style_text_font(s_lbl_fft_bin_hz, &lv_font_montserrat_14, 0);
+        lv_obj_set_width(s_lbl_fft_bin_hz, 100);
+        lv_obj_add_flag(s_lbl_fft_bin_hz, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    /* Baris LO span (250 Hz .. 10 kHz). */
+    {
+        const int32_t sh = sdr_config_span_half_get();
+        const int32_t sh_eff = sdr_config_span_half_effective();
+        lv_obj_t *row = ui_cfg_row(body, "LO span", 96);
+        s_lbl_span_val = lv_label_create(row);
+        char sv[40];
+        fmt_span_hz(sv, sizeof(sv), sh_eff, sh_eff != sh);
+        lv_label_set_text(s_lbl_span_val, sv);
+        lv_obj_set_style_text_color(s_lbl_span_val, ui_col_dim(), 0);
+        lv_obj_set_style_text_font(s_lbl_span_val, &lv_font_montserrat_14, 0);
+        lv_obj_set_width(s_lbl_span_val, 90);
+        lv_obj_add_flag(s_lbl_span_val, LV_OBJ_FLAG_CLICKABLE);
+
+        size_t sc = 0;
+        const int32_t *sopts = sdr_config_span_options(&sc);
+        s_btn_span_n = 0;
+        for (size_t i = 0; i < sc; i++) {
+            char stxt[12];
+            if (sopts[i] >= 1000) {
+                snprintf(stxt, sizeof(stxt), "%ldK", (long)(sopts[i] / 1000));
+            } else {
+                snprintf(stxt, sizeof(stxt), "%ld", (long)sopts[i]);
+            }
+            lv_obj_t *b = ui_cfg_button(row, stxt, 30);
+            lv_obj_add_event_cb(b, span_cb, LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)sopts[i]);
+            if (sopts[i] == sh) {
+                lv_obj_add_state(b, LV_STATE_CHECKED);
+            }
+            if (s_btn_span_n < UI_SPAN_BTN_MAX) {
+                s_btn_span[s_btn_span_n] = b;
+                s_btn_span_val[s_btn_span_n] = sopts[i];
+                s_btn_span_n++;
+            }
+        }
     }
 }
 

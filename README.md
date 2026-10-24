@@ -12,7 +12,7 @@
 [![LVGL 9.6](https://img.shields.io/badge/UI-LVGL%209.6-orange)]()
 [![esp-dsp 1.8.2](https://img.shields.io/badge/DSP-esp--dsp%201.8.2-purple)]()
 [![sigma-delta audio](https://img.shields.io/badge/audio--out-Sigma--Delta%201--bit-007EC6)]()
-[![SSB USB/LSB](https://img.shields.io/badge/mode-SSB%20USB/LSB-red)]()
+[![SSB USB/LSB + AM](https://img.shields.io/badge/mode-SSB%20USB/LSB%20·%20AM-red)]()
 [![MIT](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![ham radio](https://img.shields.io/badge/ham%20radio-%E2%97%86%E2%97%86-gold?labelColor=black)]()
 
@@ -40,6 +40,8 @@
 - [x] ADC DMA I/Q 48 kHz/kanal (continuous, 12-bit, pool internal 8 KB)
 - [x] DC block + NCO offset digital (LUT 1024 + interp linear)
 - [x] Demodulasi SSB Weaver (USB/LSB, BFO 1500 Hz) @12 kHz pasca-decimation
+- [x] Demodulasi AM (envelope detection |I+jQ|, DC-blocker envelope) — **mode default**
+- [x] Default LO label `7 203 000 Hz` (Kconfig `CONFIG_SDR_DEFAULT_LO_HZ`)
 - [x] AGC (attack 5 ms / release 200 ms, gain −36…+54 dB) + volume 0–100 %
 - [x] Audio out sigma-delta 1-bit @10 MHz carrier (GPIO26 → FM8002A)
 - [x] Spektrum: jendela Hann 1024 @12 kHz di-zero-pad ke FFT 2048 (5,86 Hz/bin),
@@ -55,8 +57,8 @@
       (mode, ±, step, keypad, volume)
 - [x] **Self-test DSP on-target** (`CONFIG_SDR_SELFTEST=y`, default `n`): I/Q
       sintetis disuntikkan ke rantai DSP **tanpa ADC** (GPIO35/36 bebas),
-      15 kasus uji (generator, DC removal, NCO, spektrum, demod USB/LSB,
-      volume, AGC, decimasi) dengan laporan PASS/WARN/FAIL di log serial
+       16 kasus uji (generator, DC removal, NCO, spektrum, demod USB/LSB/AM,
+       volume, AGC, decimasi) dengan laporan PASS/WARN/FAIL di log serial
 
 ---
 

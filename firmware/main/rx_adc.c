@@ -24,6 +24,7 @@
 #include "soc/soc_caps.h"
 
 #include "esp_adc/adc_continuous.h"
+#include "sdr_config.h"
 
 static const char *TAG = "rx_adc";
 
@@ -39,16 +40,31 @@ static const char *TAG = "rx_adc";
 
 /* Kconfig menyimpan nilai dB; driver meminta nilai enum `adc_atten_t`. */
 #if CONFIG_SDR_ADC_ATTEN_DB == 0
-#define RX_ADC_ATTEN            ADC_ATTEN_DB_0
+#define RX_ADC_ATTEN_DEFAULT            ADC_ATTEN_DB_0
 #elif CONFIG_SDR_ADC_ATTEN_DB == 3
-#define RX_ADC_ATTEN            ADC_ATTEN_DB_2_5
+#define RX_ADC_ATTEN_DEFAULT            ADC_ATTEN_DB_2_5
 #elif CONFIG_SDR_ADC_ATTEN_DB == 6
-#define RX_ADC_ATTEN            ADC_ATTEN_DB_6
+#define RX_ADC_ATTEN_DEFAULT            ADC_ATTEN_DB_6
 #elif CONFIG_SDR_ADC_ATTEN_DB == 11 || CONFIG_SDR_ADC_ATTEN_DB == 12
-#define RX_ADC_ATTEN            ADC_ATTEN_DB_12
+#define RX_ADC_ATTEN_DEFAULT            ADC_ATTEN_DB_12
 #else
 #error "SDR_ADC_ATTEN_DB harus 0, 3, 6, atau 11 (lihat help Kconfig)"
 #endif
+
+static adc_atten_t rx_adc_atten_from_db(uint8_t db)
+{
+    switch (db) {
+    case 0:
+        return ADC_ATTEN_DB_0;
+    case 3:
+        return ADC_ATTEN_DB_2_5;
+    case 6:
+        return ADC_ATTEN_DB_6;
+    case 11:
+    default:
+        return ADC_ATTEN_DB_12;
+    }
+}
 
 _Static_assert((RX_ADC_CONV_FRAME_BYTES % SOC_ADC_DIGI_DATA_BYTES_PER_CONV) == 0,
                "conv_frame_size harus kelipatan SOC_ADC_DIGI_DATA_BYTES_PER_CONV");
@@ -101,10 +117,13 @@ esp_err_t rx_adc_init(void)
                         "new_handle (I2S0 sudah dipakai peripheral lain?)");
 
     /* Bit width harus eksplisit: driver menolak ADC_BITWIDTH_DEFAULT (0). */
+    sdr_config_t rcfg;
+    sdr_config_get(&rcfg);
+    const adc_atten_t atten = rx_adc_atten_from_db(rcfg.adc_atten_db);
     const adc_digi_pattern_config_t pattern[RX_ADC_PATTERN_NUM] = {
-        { .atten = RX_ADC_ATTEN, .channel = RX_ADC_CH_I,
+        { .atten = atten, .channel = RX_ADC_CH_I,
           .unit = RX_ADC_UNIT, .bit_width = ADC_BITWIDTH_12 },
-        { .atten = RX_ADC_ATTEN, .channel = RX_ADC_CH_Q,
+        { .atten = atten, .channel = RX_ADC_CH_Q,
           .unit = RX_ADC_UNIT, .bit_width = ADC_BITWIDTH_12 },
     };
     const adc_continuous_config_t cfg = {
@@ -118,15 +137,15 @@ esp_err_t rx_adc_init(void)
     const adc_continuous_evt_cbs_t cbs = {
         .on_pool_ovf = rx_adc_pool_ovf_cb,
     };
-    ESP_RETURN_ON_ERROR(adc_continuous_register_event_callbacks(s_handle, &cbs,
-                                                                NULL),
-                        TAG, "register_event_callbacks");
+    const esp_err_t err =
+        adc_continuous_register_event_callbacks(s_handle, &cbs, NULL);
+    ESP_RETURN_ON_ERROR(err, TAG, "register_event_callbacks");
     ESP_RETURN_ON_ERROR(adc_continuous_start(s_handle), TAG, "start");
 
     s_rate_t0_us = esp_timer_get_time();
     ESP_LOGI(TAG, "I/Q DMA: CH0=GPIO36, CH7=GPIO35, %d Hz/kanal (%d Hz agregat), "
-             "atten %d dB, pool %d B, frame %d B",
-             CONFIG_SDR_ADC_FS_HZ, RX_ADC_AGG_FS_HZ, CONFIG_SDR_ADC_ATTEN_DB,
+             "atten %u dB, pool %d B, frame %d B",
+             CONFIG_SDR_ADC_FS_HZ, RX_ADC_AGG_FS_HZ, rcfg.adc_atten_db,
              RX_ADC_POOL_BYTES, RX_ADC_CONV_FRAME_BYTES);
     return ESP_OK;
 }

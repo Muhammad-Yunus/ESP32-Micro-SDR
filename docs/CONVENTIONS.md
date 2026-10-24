@@ -143,14 +143,17 @@ Melanggar aturan di sini = revisi wajib sebelum dianggap selesai.
 - Seluruh parameter yang mungkin diubah saat tuning dikumpulkan di
   `main/Kconfig.projbuild` dengan menu `SDR Configuration`, prefix simbol
   `CONFIG_SDR_*`:
-  ```
-  CONFIG_SDR_ADC_FS_HZ=48000
-  CONFIG_SDR_FFT_N=1024
-  CONFIG_SDR_DISPLAY_SPAN_HZ=500
-  CONFIG_SDR_BFO_HZ=1500
-  CONFIG_SDR_WATERFALL_ROWS=60
-  CONFIG_SDR_ADC_ATTEN_DB=11
-  ```
+   ```
+   CONFIG_SDR_ADC_FS_HZ=48000
+   CONFIG_SDR_FFT_N=1024
+   CONFIG_SDR_DISPLAY_SPAN_HZ=500
+   CONFIG_SDR_BFO_HZ=1500
+   CONFIG_SDR_WATERFALL_ROWS=60
+   CONFIG_SDR_ADC_ATTEN_DB=11
+   CONFIG_SDR_DEFAULT_LO_HZ=7203000
+   CONFIG_SDR_DEFAULT_MODE_AM=y
+   CONFIG_SDR_AUDIO_SCALE_DIV=4
+   ```
 - Nilai default harus sama dengan yang tertulis di `sdkconfig.defaults`.
 - Mengubah default = mengubah dokumen (PRD/TECH_STACK) juga.
 - `CONFIG_SDR_DISPLAY_SPAN_HZ` hanya nilai **awal** span tampilan; span &

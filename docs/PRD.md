@@ -23,7 +23,7 @@ detector (quadrature sampling detector) eksternal**.
 
 **Tanggung jawab firmware ini**:
 1. Sampling simultan I/Q via ADC DMA.
-2. Pemrosesan DSP (DC removal, offset tuning digital, demodulasi SSB USB/LSB, AGC).
+2. Pemrosesan DSP (DC removal, offset tuning digital, demodulasi SSB USB/LSB & AM, AGC).
 3. Output audio ke amplifier on-board (FM8002A via GPIO26) memakai modulator
    **sigma-delta (SDM) 1-bit** dari `esp_driver_sdm`.
 4. Visualisasi spektrum + waterfall + UI tuning via touchscreen.
@@ -114,16 +114,25 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   dijanjikan oleh readout spektrum (butuh estimator terpisah/lebih
   panjang — di luar v1).
 
-### FR-4 — Demodulasi SSB (USB/LSB)
+### FR-4 — Demodulasi SSB (USB/LSB) & AM
 - Struktur **Weaver / phasing dua mixer** (bukan Hilbert — dipilih karena
   setara secara matematis dan lebih murah; lihat ARCHITECTURE.md §6):
   1. LPF kanal 2,7 kHz pada I dan Q.
   2. Decimasi halfband 48 → 24 → 12 kHz.
   3. Mixer BFO ke-2 pada 1500 Hz: USB = `e^{−j2π·1500·t}`,
      LSB = `e^{+j2π·1500·t}` (pertukaran tanda = pergantian mode).
-  4. Ambil komponen I hasil mix → audio LPF ~2,0 kHz.
+   4. Ambil komponen I hasil mix → audio LPF ~2,0 kHz.
+- **Mode AM (envelope detection)**: pada IQ hasil decim 12 kHz, deteksi
+  envelope `|I + jQ|` = `sqrt(I² + Q²)`; DC-blocker khusus envelope membuang
+  komponen carrier (DC kanal I); output melewati audio LPF ~2,0 kHz yang
+  sama dengan SSB. DC blocker biasa (tahap 2) dilewati pada mode AM karena
+  carrier AM berbentuk komponen DC kanal I (lihat ARCHITECTURE.md §6).
+  Mode default = **AM** (`CONFIG_SDR_DEFAULT_MODE_AM`, default LO label
+  `7203000 Hz`); tombol mode di bar bawah tetap dapat beralih USB/LSB/AM.
 - **Acceptance**: sinyal uji tone pada satu sisi terdengar jelas pada mode yang
   benar dan melemah ≥ 25 dB (image sideband) pada mode yang salah.
+  Mode AM: sinyal modulasi (carrier DC + tone) menghasilkan komponen
+  frekuensi modulasi di keluaran audio (diukur Goertzel, self-test T06a).
 
 ### FR-5 — AGC + Volume + Audio Out
 - AGC envelope: deteksi peak/RMS jangka pendek; attack ~5 ms, release ~200 ms;
@@ -132,6 +141,9 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Keluaran: `int8` (pulse density) → `sdm_channel_set_pulse_density()` pada
   kanal SDM (GPIO26) yang dipacu task audio berprioritas pada Core 1.
   (Jalur `bsp_audio_pcm_write()`/`dac_continuous` tidak dipakai — bentrok I2S0.)
+  Sebelum ditulis ke SDM, density dibagi `CONFIG_SDR_AUDIO_SCALE_DIV`
+  (default **4 = −12 dB**): attenuasi output speaker agar volume 5–10 % masih
+  nyaman tanpa clip; tidak menyentuh skala `int8` jalur DSP/AGC.
 - Volume user 0–100 % (default **0 % = mute**; dinaikkan lewat tombol Vol+/Vol−).
 - **Acceptance**: AGC meregulasi (dua level input menghasilkan keluaran
   dalam ±6 dB) selama gain yang dibutuhkan ≤ `SDR_AGC_GAIN_MAX` (default
@@ -139,12 +151,18 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   input **≥ 25 % FS** (teoretis target/gain_max = 18,75 % FS; 25 % FS
   terukur di board). Di bawah lantai tersebut gain saturasi di batas atas
   dan keluaran ikut mengecil — perilaku yang diterima, bukan kegagalan.
-  Selain itu: tidak ada klik/dorongan saat AGC beroperasi; underrun antrean
-  audio = 0 saat steady-state.
-  *Status (self-test 2026-10-22): T09 PASS (selisih 2,4 dB untuk input
-  0,50 vs 0,25 FS), T10 PASS (puncak PCM 102 vs target 96), T09b WARN hanya
-  pada input 0,05 FS (< lantai AGC) — sesuai acceptance di atas. Log
-  produksi: `g 512.0`. Lihat §6.1 T-A/T-A2.*
+   Selain itu: tidak ada klik/dorongan saat AGC beroperasi; underrun antrean
+   audio = 0 saat steady-state.
+   *Status (self-test 2026-10-22): T09 PASS (selisih 2,4 dB untuk input
+   0,50 vs 0,25 FS), T10 PASS (puncak PCM 102 vs target 96), T09b WARN hanya
+   pada input 0,05 FS (< lantai AGC) — sesuai acceptance di atas. Log
+   produksi: `g 512.0`. Lihat §6.1 T-A/T-A2.*
+- **Squelch otomatis** (bagian dari FR-5; M5 parsial): hanya aktif saat AGC
+  ON. Envelope pra-gain di bawah lantai AGC (`target/gain_max` ≈ 25 % FS) →
+  gerbang output difade ke sunyi (~330 ms); sinyal datang → terbuka cepat
+  (~3 ms). Menghilangkan desis/krek dari noise floor RF yang naik mengikuti
+  volume saat tidak ada sinyal, tanpa menurunkan sensitivitas sinyal nyata. Mode gain
+  manual (AGC off) tidak digate.
 
 ### FR-6 — Spektrum (FFT Bar)
 - FFT 1024 titik **pada IQ hasil decim 12 kHz** (11,7 Hz/bin), Hann window,
@@ -175,14 +193,15 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   frame-rate collapse saat UI disentuh.
 
 ### FR-8 — Tampilan Frekuensi
-- Bar atas menampilkan: frekuensi utama (label LO, default `20.000.000`,
+- Bar atas menampilkan: frekuensi utama (label LO, default `7.203.000`,
   **diinput user via keypad — murni label visual** karena LO riil dikontrol
   alat terpisah) + offset NCO (mis. `[+1.200]`).
 - Frekuensi aktual yang dirujuk = `lo_label + nco_offset`.
 - Bar atas juga memuat indikator volume (ikon + 5 bar + persentase) dan ikon
-  **gear** untuk membuka modal Settings; bar bawah memuat mode USB/LSB,
+  **gear** untuk membuka modal Settings; bar bawah memuat mode USB/LSB/AM
+  (default **AM**, `CONFIG_SDR_DEFAULT_MODE_AM`),
   tombol ±, step, keypad, dan kontrol volume.
-- **Acceptance**: perubahan offset langsung tercermin di teks; mode (USB/LSB),
+- **Acceptance**: perubahan offset langsung tercermin di teks; mode (USB/LSB/AM),
   langkah step, dan readout dBFS di chip puncak terlihat.
 
 ### FR-9 — UI & Input Touch
@@ -218,8 +237,9 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
   rantai DSP — hanya pemanggilan yang sama.
 - Cakupan: generator (T01), DC removal (T02), NCO offset (T03), spektrum &
   mode bin 1024/2048 (T04–T05), demodulasi USB/LSB + penolakan image
-  (T06–T07b), skala volume (T08), AGC + rentang dinamis (T09, T09b, T10),
-  rasio decimasi (T11), ADC tidak dipakai (T12), kestabilan heap (T13).
+  (T06–T07b), AM envelope detection (T06a), skala volume (T08),
+  AGC + rentang dinamis (T09, T09b, T10), rasio decimasi (T11),
+  ADC tidak dipakai (T12), kestabilan heap (T13).
 - Laporan ke log serial (tag `selftest`) dengan status **PASS / WARN / FAIL**;
   WARN = berfungsi tetapi di luar syarat acceptance (mis. level input di
   bawah lantai AGC) atau hasil pengukuran hanya batas bawah.
@@ -251,7 +271,7 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 ## 5. Out of Scope (v1) — JANGAN diimplementasikan tanpa revisi PRD
 
 - Kontrol Si5351 / VFO dari MCU (LO di luar).
-- Mode AM, FM, CW, digital mode.
+- Mode FM, CW, digital mode (AM sudah masuk v1, FR-4).
 - Perekaman ke microSD (BSP sudah mendukung mount — cadangan M5).
 - DAC I2S eksternal (pin 21/25 tersedia — cadangan kualitas audio).
 - WiFi / Bluetooth / jaringan apa pun (nonaktif; hemat RAM & gangguan ADC).
@@ -281,12 +301,13 @@ oleh pengguna di board.
 
 ### 6.1 Hasil verifikasi self-test (FR-11, 2026-10-22)
 
-Build `CONFIG_SDR_SELFTEST=y` di board: **15 kasus → 14 PASS, 1 WARN, 0 FAIL**
+Build `CONFIG_SDR_SELFTEST=y` di board: **16 kasus → 15 PASS, 1 WARN, 0 FAIL**
 (log serial tag `selftest`). Self-test juga menemukan **dua bug produksi** yang
 sudah diperbaiki (spektrum datar karena salah indeks snapshot; delay line FIR
-32 float meleset 4 float) dan memicu **tiga keputusan** pengguna: polaritas
-USB/LSB ditukar, batas gain AGC dinaikkan ke 512, dan acceptance FR-5
-direvisi ke rentang kerja AGC.
+32 float meleset 4 float) dan memicu **empat keputusan** pengguna: polaritas
+USB/LSB ditukar, batas gain AGC dinaikkan ke 512, acceptance FR-5 direvisi ke
+rentang kerja AGC, dan demodulasi **AM (envelope detection)** ditambahkan +
+dijadikan mode default (lihat FR-4).
 
 | # | Temuan | Bukti terukur (board) | Status |
 | :--- | :--- | :--- | :--- |
@@ -294,6 +315,7 @@ direvisi ke rentang kerja AGC.
 | T-A2 | **Rentang dinamis 20 dB belum tercapai**: AGC hanya bisa mengompensasi selama gain tersedia (≤ 512) | T09b: input 0,50 vs 0,05 FS → selisih output 16,5 dB; lantai AGC = 25 % FS (input ≥ 0,19 FS agar target 96 tercapai) | **Diterima** — acceptance FR-5 direvisi (keputusan pengguna, 2026-10-22): AGC dijanjikan meregulasi untuk input **≥ 25 % FS**; di bawah lantai, gain saturasi di batas atas dan itu bukan kegagalan |
 | T-B | **Label USB/LSB terbalik**: USB memilih sideband bawah, LSB sideband atas — berlawanan dengan FR-4 dan konvensi SSB | Sebelum: USB −2000 Hz, LSB +2000 Hz | **Diperbaiki** — tanda `bfo_hz` ditukar; kini T06 USB +2000 Hz (sideband atas), T07 LSB −2000 Hz (sideband bawah), T07b PASS sesuai FR-4 |
 | T-C | Penolakan image **jauh melampaui** syarat FR-4 (≥ 25 dB): audio LPF 64 tap + decimasi menahan image sampai batas kuantisasi | T06/T07: image tolak ≥ 116,2 dB (AGC mati) / ≥ 157,1 dB (AGC aktif) | PASS — acceptance FR-4 terpenuhi; angka hanya batas bawah karena image < 0,5 LSB `int8` |
+| T-AM | **Penguat jalur AM**: DC blocker tahap 2 membuang carrier AM sebelum envelope detection; amplitudo envelope kecil terkuantisasi ke 0 tanpa AGC | T06a: carrier DC + tone 500 Hz → Goertzel 500 Hz = 0.0 (AGC mati, int8) vs 49115.4 (AGC aktif); RMS keluaran 68, puncak 106 | **Diperbaiki** — mode AM melewati DC blocker tahap 2 (carrier wajib tetap ada) + pengujian T06a memakai AGC aktif agar level envelope ter-amplifikasi ke skala penuh. PASS |
 
 Catatan: pengukuran image memakai AGC **mati** (`agc_target = 0`) untuk
 mengukur penolakan sebenarnya; dengan AGC aktif gain sama untuk sinyal maupun

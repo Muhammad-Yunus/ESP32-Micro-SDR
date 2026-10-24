@@ -578,6 +578,48 @@ static void st_test_demod(uint8_t mode, const char *id, int *pass_sign)
     }
 }
 
+/* T06a - AM envelope detection (FR-4/AM): carrier (DC kanal I) + tone
+ * modulasi -> envelope bervariasi pada frekuensi modulasi; setelah DC
+ * block envelope + LPF audio, komponen 500 Hz harus ada di keluaran. */
+static void st_test_am_envelope(void)
+{
+    iq_gen_cfg_t cfg;
+    iq_gen_t gen;
+    float mag500 = 0.0f;
+    char m1[16];
+
+    /* AGC AKTIF: amplitudo audio hasil envelope kecil (fraksi dari carrier)
+     * sehingga tanpa penguatan AGC akan terkuantisasi ke nol oleh int8.
+     * Target AGC meng-burst level keluaran ke dekat skala penuh. */
+    st_prepare(SDR_MODE_AM, 100, CONFIG_SDR_AGC_TARGET);
+
+    /* Sinyal AM sintesis: carrier = DC 1.0 pada kanal I (Q = 0) +
+     * tone kompleks 500 Hz (amplitudo 0,4) -> amplitudo envelope
+     * bervariasi pada 500 Hz (komponen pertama dari |C + A e^jwm t|). */
+    iq_gen_cfg_default(&cfg, (float)CONFIG_SDR_ADC_FS_HZ);
+    cfg.dc_i = 1.0f;
+    cfg.tone_count = 1;
+    cfg.tone_hz[0] = ST_AUDIO_HZ;
+    cfg.tone_amp[0] = 0.4f;
+    iq_gen_init(&gen, &cfg);
+
+    st_feed(&gen, ST_WARMUP_BLOCKS);
+    st_capture_end();
+    st_feed(&gen, ST_CAPTURE_BLOCKS);
+    s_capture_on = false;
+
+    mag500 = st_goertzel(s_pcm, s_pcm_len, ST_AUDIO_HZ,
+                         (float)CONFIG_SDR_AUDIO_FS_HZ);
+    const bool ok = (mag500 > 2.0f);
+
+    char r1[16];
+    st_f1(st_rms(s_pcm, s_pcm_len), r1, sizeof(r1));
+    st_f1(mag500, m1, sizeof(m1));
+    st_add("T06a", "AM envelope detection", ok ? ST_PASS : ST_FAIL,
+           "Goertzel 500 Hz = %s | len %u rms %s peak %d (diagnostik)",
+           m1, (unsigned)s_pcm_len, r1, st_peak_abs(s_pcm, s_pcm_len));
+}
+
 /* T08 - volume: 0% harus diam, 50% harus separuh dari 100%. */
 static void st_test_volume(void)
 {
@@ -894,6 +936,7 @@ void selftest_task(void *arg)
 
     st_test_demod(SDR_MODE_USB, "T06", &usb_sign);
     st_test_demod(SDR_MODE_LSB, "T07", &lsb_sign);
+    st_test_am_envelope();          /* T06a - AM envelope */
     s_pass_sign = usb_sign ? usb_sign : lsb_sign;
 
     if (usb_sign != 0 && lsb_sign != 0 && usb_sign == lsb_sign) {
