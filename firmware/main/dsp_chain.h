@@ -3,7 +3,7 @@
  *
  * dsp_chain — pemilik sdr_rx_task (Core 1): baca blok I/Q dari rx_adc lalu
  * jalankan rantai DSP (docs/ARCHITECTURE.md §6): DC block → NCO offset →
- * LPF/decimasi 48→24→12 → BFO → audio LPF → AGC+volume → audio_out_push.
+ * LPF/decimasi 48→24→12 → BFO → audio LPF + audio HPF → AGC+volume → audio_out_push.
  *
  * Hook self-test (CONVENTIONS.md §5 "tone-injection internal bypass ADC"):
  * `dsp_chain_process_block()` dapat dipanggil dengan I/Q sintetis dan

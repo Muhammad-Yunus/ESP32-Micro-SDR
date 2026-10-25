@@ -9,6 +9,8 @@
  */
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 #include "lvgl.h"
@@ -46,3 +48,13 @@ void ui_scope_push(const float *db, int nbins);
  * digambar ulang dengan skala baru.
  */
 void ui_scope_refresh(void);
+
+/**
+ * @brief Aktifkan / nonaktifkan timer spectrum (ON/OFF Scope).
+ *
+ * `on = false` → timer dipause: tidak ada drain spectrum_get_db(), tidak
+ * ada render line chart / waterfall / peak. DSP task tetap berjalan
+ * (audio normal); spectrum_ingest() tetap mengisi pool (ditimpa
+ * otomatis). `on = true` → timer diresume.
+ */
+void ui_scope_set_enabled(bool on);

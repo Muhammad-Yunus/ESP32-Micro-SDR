@@ -9,7 +9,7 @@
  *   3. NCO offset  rotasi kompleks, LUT 1024         48 kHz
  *   4. LPF kanal + decimasi 48→24→12 (dsps_fird)     12 kHz
  *   5. BFO (USB/LSB) / envelope (AM) / FM disc       12 kHz
- *   6. audio LPF ~2,0 kHz (dsps_fir)                 12 kHz
+ *   6. audio LPF ~2,0 kHz (dsps_fir) + audio HPF 10 Hz (biquad)    12 kHz
  *   7. AGC + volume → int8 → audio_out_push          12 kHz
  *
  * Loop dipacing oleh blocking `rx_adc_read()` — tanpa vTaskDelay, tanpa
@@ -62,6 +62,13 @@ static fir_f32_t s_fir_aud;
 static float s_dl_aud[DSP_AUD_TAPS + 4];        /* dsps_fir_init_f32: N+4  */
 static uint16_t s_aud_lpf_hz;                   /* cutoff aktif saat ini */
 
+/* Tahap 6b: audio HPF single-pole (DC blocker) fc≈10 Hz @12 kHz (FR-AUDC-001).
+ * Bentuk sama dengan DC blocker tahap 2, tapi koef R dihitung dari fc:
+ *   R = exp(-2π·fc/fs)
+ * State tersimpan antar blok (BSS). */
+static float s_hpf_r;                    /* pole (0..1)                */
+static float s_hpf_x1, s_hpf_y1;        /* state filter               */
+
 /* Desain ulang + inisialisasi koefisien LPF audio sesuai cutoff (Hz). */
 static void dsp_lpf_design(float *h, int n, float fc_hz, float fs_hz);
 static void dsp_aud_lpf_apply(uint16_t hz)
@@ -70,6 +77,16 @@ static void dsp_aud_lpf_apply(uint16_t hz)
                    (float)CONFIG_SDR_AUDIO_FS_HZ);
     dsps_fir_init_f32(&s_fir_aud, s_aud, s_dl_aud, DSP_AUD_TAPS);
     s_aud_lpf_hz = hz;
+}
+
+/* Desain koefisien HPF single-pole fc=10 Hz, fs=12 kHz.
+ * y[n] = x[n] - x[n-1] + R·y[n-1],  R = exp(-2π·fc/fs).
+ * Bentuk sama dengan DC blocker (tahap 2) — sudah terbukti stabil. */
+static void dsp_aud_hpf_design(void)
+{
+    const float fs = (float)CONFIG_SDR_AUDIO_FS_HZ;
+    const float fc = 10.0f;
+    s_hpf_r = expf(-2.0f * DSP_PI * fc / fs);
 }
 
 /* Tahap 2: DC block per kanal. */
@@ -112,6 +129,17 @@ static float s_f24_i[DSP_BLOCK_FRAMES / 2], s_f24_q[DSP_BLOCK_FRAMES / 2];
 static float s_f12_i[DSP_BLOCK_FRAMES / 4], s_f12_q[DSP_BLOCK_FRAMES / 4];
 static float s_audio_f[DSP_BLOCK_FRAMES / 4];
 static int8_t s_audio_i8[DSP_BLOCK_FRAMES / 4];
+
+/* Bypass runtime (toggle dari Settings): jalur mentah ADC → speaker.
+ * Skip seluruh rantai DSP (DC block / NCO / decim FIR / BFO / LPF / AGC).
+ * Ambil kanal I, DC block sederhana, decim 4:1 (sampel ke-0 tiap 4),
+ * auto-gain → int8 → audio_out_push. */
+#define DSP_BYP_GAIN_MAX      256.0f
+#define DSP_BYP_DC_R         0.996f
+static float s_by_dc_x1, s_by_dc_y1;
+static float s_by_gain_slow;
+static uint32_t s_by_blk_cnt;  /* diagnostik: hitung blok bypass */
+static uint32_t s_by_push_fail; /* push gagal (pool penuh) */
 
 /* Diagnostik. */
 static uint32_t s_blocks;
@@ -251,6 +279,94 @@ static int8_t dsp_agc_and_scale(float x, float vol, float target, bool agc_on,
         y = -127.0f;
     }
     return (int8_t)lroundf(y);
+}
+
+/* ----------------------------------------------------------------------
+ * Bypass runtime: jalur mentah ADC → speaker (tanpa rantai DSP penuh).
+ * Ambil I, DC block, decim 4:1 (sampel 0,4,8,...), auto-gain, int8.
+ * -------------------------------------------------------------------- */
+static void dsp_bypass_block(const iq_t *in, size_t frames)
+{
+    if (frames < 4) {
+        return;
+    }
+    const size_t n = frames & ~(size_t)3; /* multiple of 4 */
+    size_t out = 0;
+
+    /* DC block pada kanal I (single-pole, R = 0.996). */
+    for (size_t k = 0; k < n; k += 4) {
+        const float x = in[k].i;
+        const float d = x - s_by_dc_x1 + DSP_BYP_DC_R * s_by_dc_y1;
+        s_by_dc_x1 = x;
+        s_by_dc_y1 = d;
+
+        /* Auto-gain: target ~0.5 FS, smooth attack. */
+        const float ref = (fabsf(d) > 1e-4f) ? fabsf(d) : 1e-4f;
+        float g_des = 0.5f / ref;
+        if (g_des < 1.0f) g_des = 1.0f;
+        if (g_des > DSP_BYP_GAIN_MAX) g_des = DSP_BYP_GAIN_MAX;
+        s_by_gain_slow += (g_des - s_by_gain_slow) * 0.02f;
+
+        /* 4x boost kompensasi CONFIG_SDR_AUDIO_SCALE_DIV di audio_block_one. */
+        float y = d * s_by_gain_slow * 4.0f;
+        if (y > 127.0f) y = 127.0f;
+        if (y < -127.0f) y = -127.0f;
+        s_audio_i8[out++] = (int8_t)lroundf(y);
+    }
+
+    if (out > 0) {
+        audio_out_push(s_audio_i8, out);
+    }
+    s_by_blk_cnt++;
+}
+
+/* Bypass Q-channel (untuk compile-time CONFIG_SDR_DEBUG_BYPASS_DSP). */
+static void dsp_bypass_block_q(const iq_t *in, size_t frames)
+{
+    if (frames < 4) {
+        return;
+    }
+    const size_t n = frames & ~(size_t)3;
+    size_t out = 0;
+
+    for (size_t k = 0; k < n; k += 4) {
+        if (out >= (size_t)(DSP_BLOCK_FRAMES / 4)) break;
+        const float x = in[k].q;
+        const float d = x - s_by_dc_x1 + DSP_BYP_DC_R * s_by_dc_y1;
+        s_by_dc_x1 = x;
+        s_by_dc_y1 = d;
+
+        const float ref = (fabsf(d) > 1e-4f) ? fabsf(d) : 1e-4f;
+        float g_des = 0.5f / ref;
+        if (g_des < 1.0f) g_des = 1.0f;
+        if (g_des > DSP_BYP_GAIN_MAX) g_des = DSP_BYP_GAIN_MAX;
+        s_by_gain_slow += (g_des - s_by_gain_slow) * 0.05f;
+
+        /* Bypass: boost 4x agar sinyal lemah tetap audible setelah
+         * CONFIG_SDR_AUDIO_SCALE_DIV di audio_block_one. */
+        float y = d * s_by_gain_slow * 4.0f;
+        if (y > 127.0f) y = 127.0f;
+        if (y < -127.0f) y = -127.0f;
+        s_audio_i8[out++] = (int8_t)lroundf(y);
+    }
+
+    if (out > 0) {
+        s_by_push_fail += !audio_out_push(s_audio_i8, out);
+    }
+    s_by_blk_cnt++;
+    /* Log pertama: konfirmasi jalur bypass Q aktif. */
+    if (s_by_blk_cnt == 1) {
+        ESP_LOGI(TAG,
+                 "byp: Q bypass aktif (n=%u, gain=%.2f)",
+                 (unsigned)out, s_by_gain_slow);
+    }
+    /* Log tiap 200 blok: diagnostik periodik. */
+    if ((s_by_blk_cnt % 200) == 0) {
+        ESP_LOGI(TAG,
+                 "byp: blk=%u gain=%.2f push_fail=%u",
+                 (unsigned)s_by_blk_cnt, s_by_gain_slow,
+                 (unsigned)s_by_push_fail);
+    }
 }
 
 /* ----------------------------------------------------------------------
@@ -408,6 +524,16 @@ static size_t dsp_process_block(const iq_t *in, size_t frames)
         dsps_fir_f32(&s_fir_aud, s_f12_i, s_audio_f, n12);
     }
 
+    /* Tahap 6b: audio HPF single-pole fc=10 Hz (FR-AUDC-001), semua mode.
+     * Bentuk sama dengan DC blocker: y = x - x1 + R·y1. */
+    for (int k = 0; k < n12; k++) {
+        const float x0 = s_audio_f[k];
+        const float y = x0 - s_hpf_x1 + s_hpf_r * s_hpf_y1;
+        s_hpf_x1 = x0;
+        s_hpf_y1 = y;
+        s_audio_f[k] = y;
+    }
+
     /* Tahap 7: AGC + volume → int8 → antrean audio. */
     const float vol = (float)cfg.volume_pct * 0.01f;
     const float agc_target = (float)cfg.agc_target;
@@ -452,6 +578,7 @@ esp_err_t dsp_chain_init(void)
     dsps_fird_init_f32(&s_fir_hb2_i, s_hb2, s_dl_hb2_i, DSP_HB_TAPS, 2);
     dsps_fird_init_f32(&s_fir_hb2_q, s_hb2, s_dl_hb2_q, DSP_HB_TAPS, 2);
     dsp_aud_lpf_apply(CONFIG_SDR_DEFAULT_AUDIO_LPF_HZ);
+    dsp_aud_hpf_design();
 
     const float fs12 = (float)CONFIG_SDR_AUDIO_FS_HZ;
     s_agc_alpha_a =
@@ -495,6 +622,7 @@ void dsp_chain_reset(void)
     s_fir_hb2_i.pos = 0;
     s_fir_hb2_q.pos = 0;
     s_fir_aud.pos = 0;
+    s_hpf_x1 = 0.0f; s_hpf_y1 = 0.0f;
 
     s_blocks = 0;
     s_frames = 0;
@@ -549,63 +677,17 @@ void sdr_rx_task(void *arg)
         s_frames += (uint32_t)frames;
 
 #if CONFIG_SDR_DEBUG_BYPASS_DSP
-        /* DEBUG BYPASS: minimal path dari ADC menuju speaker.
-         * Tujuan diagnostik: membuktikan bahwa 1 kHz dari baseband Tayloe
-         * bisa keluar dari ADC read → audio_out tanpa dipotong NCO/BFO/LPF.
-         *
-         * Path:
-         * - ambil Q sebagai sumber utama (kamu sudah lihat Q lebih kuat)
-         * - DC block agar bias/level DC tidak membuang range
-         * - decim 48k -> 12k (mengambil 1 dari 4) untuk audio_out 12k
-         * - auto-gain sederhana dengan clipping
-         */
-        {
-            static float imax=0,qmax=0,gain=16.0f;
-            static float b_dc_q1, b_dc_q2;
-            static float b_avg_q;
-            static float b_gain_slow;
-
-            size_t out = 0;
-            for (size_t k = 0; k < frames; k += 4) {
-                if (out >= 256) break;
-                const float ii = s_block[k].i;
-                const float qq = s_block[k].q;
-
-                const float ai = (ii < 0.0f) ? -ii : ii;
-                const float aq = (qq < 0.0f) ? -qq : qq;
-                if (ai > imax) imax = ai;
-                if (aq > qmax) qmax = aq;
-
-                /* DC block pada Q (single pole, R=0.996). */
-                const float x = qq - b_dc_q1 + 0.996f * b_dc_q2;
-                b_dc_q1 = qq;
-                b_dc_q2 = x;
-
-                /* Auto-gain: target ~0.25-0.5 FS, tanpa agresif. */
-                const float ref = (qmax > 0.0001f) ? qmax : 0.0001f;
-                float g_des = 0.5f / ref;
-                if (g_des < 1.0f) g_des = 1.0f;
-                if (g_des > 256.0f) g_des = 256.0f;
-                b_gain_slow += (g_des - b_gain_slow) * 0.05f;
-                gain = b_gain_slow;
-
-                float y = x * gain;
-                if (y > 127.0f) y = 127.0f;
-                if (y < -127.0f) y = -127.0f;
-                s_audio_i8[out++] = (int8_t)lroundf(y);
-            }
-
-            static int c=0;
-            if (++c%30==0) {
-                ESP_LOGI("BYP","Imax=%.4f Qmax=%.4f sel=Q gain=%.1f out=%u",
-                         imax, qmax, gain, (unsigned)out);
-            }
-            if (out > 0) {
-                audio_out_push(s_audio_i8, out);
-            }
-        }
+        /* DEBUG BYPASS compile-time: jalur Q mentah (pengganti runtime). */
+        dsp_bypass_block_q(s_block, frames);
 #else
-        dsp_chain_process_block(s_block, frames);
+        /* Runtime bypass toggle (sdr_config.dsp_bypass) atau DSP penuh. */
+        sdr_config_t s_rx_cfg;
+        sdr_config_get(&s_rx_cfg);
+        if (s_rx_cfg.dsp_bypass) {
+            dsp_bypass_block(s_block, frames);
+        } else {
+            dsp_chain_process_block(s_block, frames);
+        }
 #endif
 
         const int64_t now_us = esp_timer_get_time();

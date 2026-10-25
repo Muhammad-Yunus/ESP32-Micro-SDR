@@ -230,8 +230,13 @@ Notasi: **[CORE 1]** = tugas real-time, **[CORE 0]** = tugas UI.
 - Layout landscape 480×320: bar frekuensi atas (52 px), area spektrum +
   waterfall (56..264), bar bawah (56 px).
 - Keypad angka LVGL untuk entry offset & label LO langsung.
-- Modal Settings (ikon gear): mode FFT bin (1024/2048) dan preset span LO
-  (±250 Hz…±10 kHz) — perubahan berlaku langsung tanpa restart.
+- Modal Settings (ikon gear): mode FFT bin (1024/2048), preset span LO
+  (±250 Hz…±10 kHz), toggle Scope (ON/OFF), toggle Bypass DSP (ON/OFF),
+  toggle Test tone + preset — perubahan berlaku langsung
+  tanpa restart. Saat Scope OFF, timer spectrum di-pause (DSP tetap
+  berjalan, audio normal). Saat Bypass ON, jalur DSP penuh (DC block → NCO
+  → decim FIR → BFO/LPF → AGC) dilewati; sinyal I mentah di-decim 4:1
+  (ambil sampel ke-0) + DC block sederhana + auto-gain → int8 → SDM.
 - **Acceptance**: seluruh kontrol dapat dijangkau tanpa restart; debounce
   touch wajar; tidak ada ghost-touch.
 

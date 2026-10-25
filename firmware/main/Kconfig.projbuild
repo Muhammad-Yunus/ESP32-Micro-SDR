@@ -15,7 +15,7 @@ config SDR_FFT_N
 
 config SDR_DISPLAY_SPAN_HZ
     int "Default display span (+/- Hz)"
-    default 50000
+    default 5000
     help
         Initial half-width of the spectrum/waterfall display around the
         tuned frequency. At runtime the span is changed from the Settings
@@ -112,13 +112,9 @@ config SDR_NCO_LIMIT_HZ
 config SDR_DEFAULT_VOLUME_PCT
     int "Default volume (%)"
     range 0 100
-    default 0
+    default 60
     help
         Initial audio volume percentage.
-
-        Default is 0 (mute) so the speaker stays silent until the user
-        raises the volume from the bottom bar (Vol+ / Vol-). Set it back
-        to 50 for a louder default.
 
 config SDR_AUDIO_FS_HZ
     int "Audio output sample rate (Hz)"
@@ -243,7 +239,7 @@ config SDR_AGC_GAIN_MAX
 
 config SDR_AGC_ENABLED
     bool "Default AGC enabled"
-    default n
+    default y
     help
         When enabled, automatic gain control is active by default. The user
         can disable it from the Settings modal and use the manual gain slider
@@ -252,7 +248,7 @@ config SDR_AGC_ENABLED
 config SDR_DEFAULT_GAIN_DB
     int "Default manual gain (dB)"
     range -24 54
-    default 20
+    default 41
     help
         Initial manual gain used when AGC is disabled. The Settings modal
         exposes a gain slider from -24 dB to +54 dB (max matches the AGC
@@ -261,11 +257,12 @@ config SDR_DEFAULT_GAIN_DB
 
 config SDR_DEFAULT_AUDIO_LPF_HZ
     int "Default audio LPF cutoff (Hz)"
-    range 100 6000
-    default 2000
+    range 100 3000
+    default 2700
     help
-        Initial audio low-pass cutoff shown in the Settings modal. The value
-        is clamped to 100..6000 Hz at runtime.
+        Initial audio low-pass cutoff shown in the Settings modal. 2700 Hz
+        covers SSB/AM voice bandwidth; narrow it to 621 Hz for FM NBFM.
+        The value is clamped to 100..3000 Hz at runtime.
 
 config SDR_DEFAULT_ADC_ATTEN_DB
     int "Default ADC attenuation (dB)"

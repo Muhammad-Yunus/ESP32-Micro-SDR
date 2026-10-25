@@ -399,8 +399,10 @@ sedangkan area plot chart 442 px (x30..471) + padding kanan 8 px.
 | 4 | `ADC atten` | preset 0 / 2.5 / 6 / 12 dB | attenuation ADC I/Q |
 | 5 | `Source` | preset IQ / Q / I | pilih kanal I/Q yang didemod |
 | 6 | `Test` | switch + preset 250 / 1k / 2k / 4k | tone sintesis DDS langsung ke SDM (bypass antrean DSP), amplitudo × volume; OFF = demod normal |
-| 7 | `FFT bin` | 1024 / 2048 (checkable) | `sdr_config_set_fft_bins()` → lebar bin 11,72 / 5,86 Hz/bin; readout Hz/bin di bawah tombol |
-| 8 | `LO span` | label + preset 250 / 500 / 1K / 2K / 5K / 10K | `sdr_config_set_span_half()` → zoom tampilan |
+| 7 | `Bypass` | switch on/off | `sdr_config_set_dsp_bypass()`; ON = jalur mentah ADC→speaker (I channel, DC block, decim 4:1, auto-gain → int8 → SDM); skip seluruh rantai DSP (NCO/BFO/LPF/AGC) |
+| 8 | `FFT bin` | 1024 / 2048 (checkable) | `sdr_config_set_fft_bins()` → lebar bin 11,72 / 5,86 Hz/bin; readout Hz/bin di bawah tombol |
+| 9 | `LO span` | label + preset 250 / 500 / 1K / 2K / 5K / 10K | `sdr_config_set_span_half()` → zoom tampilan |
+| 10 | `Scope` | switch on/off | `ui_scope_set_enabled()` → pause/resume timer spectrum; DSP tetap berjalan |
 
 Setiap perubahan skala memanggil `ui_scope_refresh()`: sinkron span efektif,
 `memset` buffer waterfall (baris lama memakai skala sebelumnya), invalidate

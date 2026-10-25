@@ -716,6 +716,18 @@ static void agc_cb(lv_event_t *e)
     sdr_config_set_agc_enabled(lv_obj_has_state(sw, LV_STATE_CHECKED));
 }
 
+static void scope_toggle_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    const bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    sdr_config_set_scope_enabled(on);
+    ui_scope_set_enabled(on);
+    if (!on) {
+        /* Bersihkan waterfall saat off agar tidak membiarkan gambar stale. */
+        /* (timer sudah pause; tidak ada render berikutnya.) */
+    }
+}
+
 static void gain_cb(lv_event_t *e)
 {
     lv_obj_t *sl = lv_event_get_target(e);
@@ -766,6 +778,14 @@ static void testtone_freq_cb(lv_event_t *e)
         }
     }
     ESP_LOGI("ui", "test tone freq -> %u Hz", (unsigned)hz);
+}
+
+static void dspbypass_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    const bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    sdr_config_set_dsp_bypass(on);
+    ESP_LOGI("ui", "DSP bypass %s (ADC -> speaker mentah)", on ? "ON" : "OFF");
 }
 
 static void atten_cb(lv_event_t *e)
@@ -1013,6 +1033,17 @@ static void settings_open_cb(lv_event_t *e)
         }
     }
 
+    /* Baris bypass DSP: ON = jalur ADC → speaker mentah (skip NCO/BFO/LPF/AGC). */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "Bypass", 96);
+        lv_obj_t *bp_sw = lv_switch_create(row);
+        lv_obj_set_size(bp_sw, 44, 28);
+        lv_obj_add_event_cb(bp_sw, dspbypass_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        if (s_cfg.dsp_bypass) {
+            lv_obj_add_state(bp_sw, LV_STATE_CHECKED);
+        }
+    }
+
     /* Baris FFT bin (512 / 1024 / 2048) + readout Hz/bin. */
     {
         lv_obj_t *row = ui_cfg_row(body, "FFT bin", 96);
@@ -1078,6 +1109,18 @@ static void settings_open_cb(lv_event_t *e)
                 s_btn_span_val[s_btn_span_n] = sopts[i];
                 s_btn_span_n++;
             }
+        }
+    }
+
+    /* Baris Scope (switch on/off spectrum + waterfall). */
+    {
+        lv_obj_t *row = ui_cfg_row(body, "Scope", 96);
+        lv_obj_t *sc_sw = lv_switch_create(row);
+        lv_obj_set_size(sc_sw, 44, 28);
+        lv_obj_add_event_cb(sc_sw, scope_toggle_cb, LV_EVENT_VALUE_CHANGED,
+                            NULL);
+        if (s_cfg.scope_enabled) {
+            lv_obj_add_state(sc_sw, LV_STATE_CHECKED);
         }
     }
 }
@@ -1414,6 +1457,13 @@ esp_err_t ui_init(void)
     /* ---- F6: spectrum bar + waterfall (FR-6) ---- */
     if (ui_scope_init(scr) != ESP_OK) {
         ESP_LOGW("ui", "ui_scope_init gagal — spectrum/waterfall tidak tampil");
+    } else {
+        /* Hormati nilai scope_enabled saat init (misal persisted off). */
+        sdr_config_t cfg;
+        sdr_config_get(&cfg);
+        if (!cfg.scope_enabled) {
+            ui_scope_set_enabled(false);
+        }
     }
 
     /* ---- Bottom control bar (FR-9) ---- */

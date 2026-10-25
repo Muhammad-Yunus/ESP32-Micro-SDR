@@ -29,7 +29,7 @@ extern "C" {
 
 #define SDR_MAX_GAIN_DB      54   /* +54 dB = x512, selaras DSP_AGC_GAIN_MAX */
 #define SDR_MIN_GAIN_DB     (-24)
-#define SDR_MAX_AUDIO_LPF_HZ 6000
+#define SDR_MAX_AUDIO_LPF_HZ 3000
 #define SDR_MIN_AUDIO_LPF_HZ 100
 #define SDR_MAX_ADC_ATTEN_DB 11
 
@@ -48,7 +48,9 @@ typedef struct {
     int16_t lo_i, lo_q;     /* I/Q calibration slots (reserved, future)    */
     uint16_t test_tone_hz;  /* 0 = off; >0 = synth sinus direct ke SDM     */
     uint16_t fft_bins;      /* 512 / 1024 / 2048                          */
-    int32_t span_half_hz;   /* ± Hz dari LO: 250/500/1k/2k/5k/10k Hz      */
+    int32_t  span_half_hz;  /* ± Hz dari LO: 250/500/1k/2k/5k/10k Hz      */
+    bool     scope_enabled; /* ON = spectrum+waterfall timer aktif        */
+    bool     dsp_bypass;    /* ON = jalur ADC→speaker mentah (skip DSP)   */
 } sdr_config_t;
 
 /** Default mode modulation dari Kconfig (CONFIG_SDR_DEFAULT_MODE_*). */
@@ -91,7 +93,8 @@ int32_t sdr_config_span_half_get(void);
  * UI, namun readout & plot memakai nilai efektif hasil fungsi ini.
  */
 int32_t sdr_config_span_half_effective(void);
-
+void   sdr_config_set_scope_enabled(bool on);
+void   sdr_config_set_dsp_bypass(bool on);
 #ifdef __cplusplus
 }
 #endif

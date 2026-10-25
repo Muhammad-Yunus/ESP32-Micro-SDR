@@ -80,6 +80,8 @@ static int64_t s_blk_sub_idx;
 static int64_t s_blk_epoch_us;
 static bool    s_blk_started;
 static int8_t  s_blk_prev_dens;
+static uint32_t s_blk_cnt;          /* diagnostik: blok diputar             */
+static int16_t  s_blk_max_abs;      /* diagnostik: max |density| blok ini   */
 
 static int8_t *audio_pool_pop(void)
 {
@@ -300,6 +302,7 @@ static void audio_block_one(void)
         s_blk_started = true;
     }
 
+    s_blk_max_abs = 0;
     for (size_t i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
         const int8_t cur = blk[i];
         for (int k = 1; k <= AUDIO_DENS_MULT; k++, s_blk_sub_idx++) {
@@ -311,8 +314,20 @@ static void audio_block_one(void)
             sdm_channel_set_pulse_density(
                 s_chan, dens / CONFIG_SDR_AUDIO_SCALE_DIV);
             s_updates++;
+            /* Track max abs density (diagnostik bypass). */
+            const int16_t ad = (dens < 0) ? -dens : dens;
+            if (ad > s_blk_max_abs) s_blk_max_abs = ad;
         }
         s_blk_prev_dens = cur;
+    }
+
+    s_blk_cnt++;
+    /* Log pertama + tiap 100 blok. */
+    if (s_blk_cnt == 1 || (s_blk_cnt % 100) == 0) {
+        ESP_LOGI(TAG,
+                 "blk: cnt=%u max_abs=%d xrun=%u upd=%u",
+                 (unsigned)s_blk_cnt, (int)s_blk_max_abs,
+                 (unsigned)s_xrun, (unsigned)s_updates);
     }
 
     if (xQueueSend(s_free_q, &blk, 0) != pdTRUE) {

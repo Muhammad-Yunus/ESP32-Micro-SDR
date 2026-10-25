@@ -49,16 +49,18 @@ uint8_t sdr_config_default_mode(void)
         .mode          = sdr_config_default_mode(),
         .volume_pct    = CONFIG_SDR_DEFAULT_VOLUME_PCT,
         .agc_target    = CONFIG_SDR_AGC_TARGET,
-        .agc_enabled   = false,
+        .agc_enabled   = CONFIG_SDR_AGC_ENABLED,
         .manual_gain_db = CONFIG_SDR_DEFAULT_GAIN_DB,
-        .src           = SDR_SRC_Q,
+        .src           = SDR_SRC_IQ,
         .lpf_hz        = CONFIG_SDR_DEFAULT_AUDIO_LPF_HZ,
         .adc_atten_db  = CONFIG_SDR_DEFAULT_ADC_ATTEN_DB,
         .lo_i          = 0,
         .lo_q          = 0,
         .test_tone_hz  = 0,
-        .fft_bins      = 2048,
+        .fft_bins      = 512,
         .span_half_hz  = CONFIG_SDR_DISPLAY_SPAN_HZ,
+        .scope_enabled = true,
+        .dsp_bypass    = false,
     };
     portEXIT_CRITICAL(&s_lock);
 }
@@ -291,4 +293,18 @@ int32_t sdr_config_span_half_effective(void)
         v = 1;
     }
     return v;
+}
+
+void sdr_config_set_scope_enabled(bool on)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.scope_enabled = on;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void sdr_config_set_dsp_bypass(bool on)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_cfg.dsp_bypass = on;
+    portEXIT_CRITICAL(&s_lock);
 }

@@ -892,3 +892,19 @@ esp_err_t ui_scope_init(lv_obj_t *parent)
     }
     return ESP_OK;
 }
+
+/* ------------------------------------------------------------------ */
+/* Enable / disable (Settings toggle): pause/resume timer.             */
+/* ------------------------------------------------------------------ */
+
+void ui_scope_set_enabled(bool on)
+{
+    if (s_timer == NULL) {
+        return;
+    }
+    if (on) {
+        lv_timer_resume(s_timer);
+    } else {
+        lv_timer_pause(s_timer);
+    }
+}
