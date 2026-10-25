@@ -18,6 +18,8 @@
 
 ---
 
+![Signal Chain Photo](docs/hardware/testing_photo_2.jpeg)
+
 ## Signal Chain
 
 ![Signal Chain Diagram](docs/hardware/testing_diagram.jpg)
@@ -106,7 +108,8 @@ Semua state runtime disimpan di `sdr_config` (`sdr_config.fft_bins`,
 ## Harware Wiring & Schematics
 
 ![Wiring diagram and schematics](docs/hardware/wiring_diagram_and_schematics.jpg)
-![Tayloe Detector PCD Matrix](docs/hardware/Tayloe_Detector_PCB_Matrix.jpg)
+![Tayloe Detector PCB Matrix](docs/hardware/Tayloe_Detector_PCB_Matrix.jpg)
+![Tayloe Detector in Back Case](docs/hardware/back_case.jpg)
 
 ---
 
